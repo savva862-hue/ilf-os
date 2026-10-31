@@ -194,9 +194,11 @@ ilf_herd_t *ilf_net_init(ilf_net_event_fn fn, void *user)
     esp_now_register_recv_cb(recv_cb);
     esp_now_register_send_cb(sent_cb);
     /* экономный режим радио: окно приёма раз в секунду (включается в ilf_net_poll) */
-    esp_now_set_wake_window(ILF_NET_WAKE_WINDOW);
+    esp_now_set_wake_window(ILF_NET_WAKE_INTERVAL);   /* сначала слушаем целиком */
     esp_wifi_connectionless_module_set_wake_interval(ILF_NET_WAKE_INTERVAL);
-    esp_wifi_set_ps(WIFI_PS_NONE);
+    /* рядом работает Bluetooth: Wi-Fi обязан быть в modem sleep, поэтому «слушать
+       всё время» = окно приёма во весь интервал, а не выключенный сон */
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     esp_now_peer_info_t b = { .channel = CHANNEL, .ifidx = WIFI_IF_STA, .encrypt = false };
     memset(b.peer_addr, 0xFF, 6);
     esp_now_add_peer(&b);
@@ -233,7 +235,7 @@ void ilf_net_poll(uint32_t now_ms)
                   (int32_t)(s_awake_until - now_ms) > 0;
     if (listen != s_listening) {
         s_listening = listen;
-        esp_wifi_set_ps(listen ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
+        esp_now_set_wake_window(listen ? ILF_NET_WAKE_INTERVAL : ILF_NET_WAKE_WINDOW);
         ESP_LOGI(TAG, "%s", listen ? "радио слушает" : "радио дремлет");
     }
 }

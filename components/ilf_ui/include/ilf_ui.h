@@ -96,6 +96,28 @@ typedef void (*ilf_ui_setup_cb)(const ilf_setup_result_t *r, void *user);
 /* Знакомство с хозяином: привет → имя хозяина → имя барашка → готово. */
 void ilf_ui_setup_start(ilf_ui_setup_cb done, void *user);
 bool ilf_ui_setup_active(void);
+/* ---------- iPhone: музыка, уведомления, код подключения ---------- */
+
+typedef enum { ILF_UI_MUSIC_PREV = 0, ILF_UI_MUSIC_TOGGLE, ILF_UI_MUSIC_NEXT } ilf_ui_music_btn_t;
+
+typedef struct {
+    void (*music)(ilf_ui_music_btn_t btn, void *user);       /* кнопка пульта */
+    void (*call)(uint32_t uid, bool accept, void *user);      /* принять / отклонить звонок */
+    void *user;
+} ilf_ui_phone_cb_t;
+
+void ilf_ui_set_phone_cb(const ilf_ui_phone_cb_t *cb);
+/* Подключён ли iPhone; имя — как барашка искать в настройках Bluetooth. */
+void ilf_ui_phone(bool connected, const char *ble_name);
+/* Что играет. title/artist могут быть пустыми. */
+void ilf_ui_music(const char *title, const char *artist, bool playing);
+/* Код для iPhone на весь экран; code < 0 — убрать. */
+void ilf_ui_passkey(int32_t code);
+/* Уведомление сверху. call — входящий звонок
+   с кнопками «принять/отклонить», висит, пока телефон его не уберёт. */
+void ilf_ui_notify(const char *app, const char *title, const char *text, bool call, uint32_t uid);
+void ilf_ui_notify_gone(uint32_t uid);
+
 /* Имя барашка в углу экрана питомца */
 void ilf_ui_set_sheep_name(const char *name);
 

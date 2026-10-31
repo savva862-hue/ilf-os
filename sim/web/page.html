@@ -69,7 +69,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   <div class="side">
     <div>
       <h1>Тестер барашка ILF</h1>
-      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны и первый запуск. Радио, звук и второй барашек тут понарошку, их заменяют кнопки ниже.</p>
+      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны и первый запуск. Радио, звук, iPhone и второй барашек тут понарошку, их заменяют кнопки ниже.</p>
     </div>
 
     <ul class="tips">
@@ -77,6 +77,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
       <li><b>Смахни</b> мышкой влево или вправо, чтобы листать приложения.</li>
       <li><b>Зажми</b> кружок в «Голосовых», чтобы записать голосовое.</li>
       <li><b>Рисуй</b> мышкой на холсте в «Рисунках».</li>
+      <li><b>Музыка</b>: подключи iPhone кнопкой справа, и пульт оживёт.</li>
     </ul>
 
     <div class="group">
@@ -91,6 +92,15 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
       <div class="btns">
         <button class="act" id="fvoice">Прислать голосовое</button>
         <button class="act" id="fdraw">Прислать рисунок</button>
+      </div>
+    </div>
+    <div class="group">
+      <h2>iPhone по Bluetooth</h2>
+      <div class="btns">
+        <button class="act" id="phone">Подключить / отключить</button>
+        <button class="act" id="pnote">Уведомление</button>
+        <button class="act" id="pcall">Звонок</button>
+        <button class="act" id="pend">Положить трубку</button>
       </div>
     </div>
     <div class="group">
@@ -109,7 +119,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
 <script>
 (async () => {
   const W = 368, H = 448;
-  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8 };
+  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8, phone: 10, pnote: 11, pcall: 12, pend: 13 };
   const toast = document.getElementById('toast');
   const canvas = document.getElementById('screen');
   const ctx = canvas.getContext('2d');
@@ -197,6 +207,10 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   on('bump', () => { wake(); e.ilf_web_event(EV.bump); });
   on('fvoice', () => { wake(); e.ilf_web_event(EV.fvoice); });
   on('fdraw', () => { wake(); e.ilf_web_event(EV.fdraw); });
+  on('phone', () => { wake(); e.ilf_web_event(EV.phone); });
+  on('pnote', () => { wake(); e.ilf_web_event(EV.pnote); });
+  on('pcall', () => { wake(); e.ilf_web_event(EV.pcall); });
+  on('pend', () => { e.ilf_web_event(EV.pend); });
   on('low', () => { wake(); e.ilf_web_event(EV.low); });
   on('ok', () => { wake(); e.ilf_web_event(EV.ok); });
   on('off', () => { off = true; e.ilf_web_event(EV.off); draw(); say('Экран погас. Нажми на экран или на кнопку сбоку, чтобы разбудить.'); });

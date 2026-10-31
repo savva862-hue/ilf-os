@@ -1,4 +1,4 @@
-#include "ilf_ui.h"
+#include "ilf_ui_priv.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -127,21 +127,6 @@ static void show(lv_obj_t *o, bool visible)
 {
     if (visible) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
-}
-
-static lv_obj_t *app_title(lv_obj_t *tile, const char *title, const char *subtitle, const char *soon)
-{
-    lv_obj_t *t = label(tile, &ilf_font_48, C_WOOL, title);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 72);
-    lv_obj_t *s = label(tile, &ilf_font_24, C_SOFT, subtitle);
-    lv_obj_set_width(s, 340);
-    lv_obj_set_style_text_align(s, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align_to(s, t, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
-    if (soon) {
-        lv_obj_t *b = label(tile, &ilf_font_24, C_SOFT, soon);
-        lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -52);
-    }
-    return t;
 }
 
 /* ---------- экран «Питомец» ---------- */
@@ -546,20 +531,6 @@ void ilf_ui_pet_note(const char *text)
     lv_label_set_text(ui.pet_note, text ? text : "");
 }
 
-static void build_music(lv_obj_t *tile)
-{
-    app_title(tile, "Музыка", "Пульт того, что играет на iPhone", "скоро · v0.3");
-    static const char *syms[3] = { LV_SYMBOL_PREV, LV_SYMBOL_PLAY, LV_SYMBOL_NEXT };
-    for (int i = 0; i < 3; i++) {
-        int size = i == 1 ? 90 : 60;
-        lv_obj_t *b = blob(tile, 84 + i * 100, 284, size, size, C_BG);
-        lv_obj_set_style_border_color(b, lv_color_hex(C_WOOL), 0);
-        lv_obj_set_style_border_width(b, i == 1 ? 5 : 4, 0);
-        lv_obj_t *l = label(b, i == 1 ? &lv_font_montserrat_32 : &lv_font_montserrat_14, C_WOOL, syms[i]);
-        lv_obj_center(l);
-    }
-}
-
 static void build_clock(lv_obj_t *tile)
 {
     ui.time_lbl = label(tile, &ilf_font_digits_120, C_WOOL, "00:00");
@@ -661,7 +632,7 @@ void ilf_ui_init(void)
     build_pet(ui.tiles[ILF_APP_PET]);
     build_voice(ui.tiles[ILF_APP_VOICE]);
     build_draw(ui.tiles[ILF_APP_DRAW]);
-    build_music(ui.tiles[ILF_APP_MUSIC]);
+    ilf_ui_build_music(ui.tiles[ILF_APP_MUSIC]);
     build_clock(ui.tiles[ILF_APP_CLOCK]);
 
     /* поверх всех экранов: заряд сверху и точки-страницы снизу */

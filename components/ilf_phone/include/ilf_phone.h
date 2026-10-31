@@ -74,6 +74,9 @@ bool ilf_ancs_parse_source(const uint8_t *d, size_t len, ilf_ancs_source_t *out)
 /* Команда в Control Point: «дай приложение, заголовок и текст уведомления uid». */
 size_t ilf_ancs_get_attributes(uint32_t uid, uint8_t *out, size_t cap);
 
+/* Команда в Control Point: нажать на уведомлении «да» (принять звонок) или «нет» (отклонить). 6 байт. */
+size_t ilf_ancs_action(uint32_t uid, bool positive, uint8_t *out);
+
 /* Ответ приходит в Data Source кусками — собираем, пока не будет целиком. */
 typedef struct {
     uint8_t buf[512];

@@ -2,6 +2,7 @@ set(ILF_UI_SRCS
     ilf_ui.c
     ilf_eye_img.c
     ilf_ui_setup.c
+    ilf_ui_phone.c
     ilf_head_img.c
     fonts/ilf_font_24.c
     fonts/ilf_font_32.c

@@ -37,6 +37,7 @@ static bool has_profile;
 static char owner[ILF_HERD_NAME_LEN] = "", sheep[ILF_HERD_NAME_LEN] = "";
 static uint32_t note_until;
 static bool screen_off;
+static bool phone_on;
 
 static void note(const char *t)
 {
@@ -90,8 +91,35 @@ static void on_setup(const ilf_setup_result_t *r, void *u)
     (void)u;
     snprintf(owner, sizeof owner, "%s", r->owner);
     snprintf(sheep, sizeof sheep, "%s", r->sheep);
+    ilf_ui_phone(phone_on, sheep);
     has_profile = true;
     ilf_ui_set_sheep_name(sheep);
+}
+
+/* ---------- игрушечный iPhone ---------- */
+
+static const char *TRACKS[][2] = {
+    { "Группа крови", "Кино" }, { "Dynamite", "BTS" }, { "Blinding Lights", "The Weeknd" },
+};
+static int track;
+static bool music_playing;
+static uint32_t pair_until;
+
+static void show_track(void) { ilf_ui_music(TRACKS[track][0], TRACKS[track][1], music_playing); }
+
+static void cb_music(ilf_ui_music_btn_t btn, void *u)
+{
+    (void)u;
+    if (btn == ILF_UI_MUSIC_TOGGLE) music_playing = !music_playing;
+    if (btn == ILF_UI_MUSIC_NEXT) track = (track + 1) % 3;
+    if (btn == ILF_UI_MUSIC_PREV) track = (track + 2) % 3;
+    show_track();
+}
+
+static void cb_call(uint32_t uid, bool accept, void *u)
+{
+    (void)uid; (void)u;
+    note(accept ? "Звонок принят на iPhone" : "Звонок отклонён");
 }
 
 /* ---------- LVGL ---------- */
@@ -131,6 +159,9 @@ EXPORT(ilf_web_init) void ilf_web_init(uint32_t seed)
     ilf_ui_herd_cb_t cb = { .record = cb_record, .next_target = cb_next, .play = cb_play,
                             .stroke = cb_stroke, .clear = cb_clear };
     ilf_ui_set_herd_cb(&cb);
+    ilf_ui_phone_cb_t pcb = { .music = cb_music, .call = cb_call };
+    ilf_ui_set_phone_cb(&pcb);
+    ilf_ui_phone(false, "ILF");
     ilf_ui_update_battery(83, false);
     refresh_target();
     ilf_ui_setup_start(on_setup, NULL);
@@ -170,6 +201,16 @@ EXPORT(ilf_web_frame) int ilf_web_frame(uint32_t dt)
     if (play_until && (int32_t)(now_ms - play_until) > 0) { play_until = 0; refresh_target(); }
     if (idle_at && (int32_t)(now_ms - idle_at) > 0) { idle_at = 0; refresh_target(); }
     if (note_until && (int32_t)(now_ms - note_until) > 0) note(NULL);
+    if (pair_until && (int32_t)(now_ms - pair_until) > 0) {
+        /* «ввёл код на iPhone» */
+        pair_until = 0;
+        phone_on = true;
+        ilf_ui_passkey(-1);
+        ilf_ui_phone(true, sheep[0] ? sheep : "ILF");
+        music_playing = true;
+        show_track();
+        note("iPhone на связи");
+    }
 
     lv_timer_handler();
     return 1;
@@ -177,7 +218,7 @@ EXPORT(ilf_web_frame) int ilf_web_frame(uint32_t dt)
 
 /* кнопки на странице */
 enum { WEB_SHAKE = 1, WEB_BUMP, WEB_FRIEND_VOICE, WEB_FRIEND_DRAW, WEB_BATTERY_LOW, WEB_BATTERY_OK,
-       WEB_SCREEN_OFF, WEB_SCREEN_ON, WEB_RESET };
+       WEB_SCREEN_OFF, WEB_SCREEN_ON, WEB_RESET, WEB_PHONE, WEB_PHONE_NOTE, WEB_PHONE_CALL, WEB_PHONE_CALL_END };
 
 EXPORT(ilf_web_event) void ilf_web_event(int what)
 {
@@ -222,6 +263,29 @@ EXPORT(ilf_web_event) void ilf_web_event(int what)
     case WEB_BATTERY_OK:
         ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_BATTERY, .battery = { 83, false } }, now_ms);
         ilf_ui_update_battery(83, false);
+        break;
+    case WEB_PHONE:
+        if (phone_on) {
+            phone_on = false;
+            ilf_ui_phone(false, sheep[0] ? sheep : "ILF");
+            note("iPhone отключился");
+        } else if (!pair_until) {
+            ilf_ui_passkey((int32_t)(100000 + now_ms % 900000));
+            pair_until = now_ms + 3500;
+        }
+        break;
+    case WEB_PHONE_NOTE:
+        if (!phone_on) { note("Сначала подключи iPhone"); break; }
+        ilf_ui_notify("Telegram", "Мама", "Ты поел? Не забудь шапку, на улице холодно", false, 1);
+        ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_TOUCH, .touch = { W / 2, 40 } }, now_ms);
+        break;
+    case WEB_PHONE_CALL:
+        if (!phone_on) { note("Сначала подключи iPhone"); break; }
+        ilf_ui_notify("Телефон", "Мама", NULL, true, 2);
+        ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_TOUCH, .touch = { W / 2, 40 } }, now_ms);
+        break;
+    case WEB_PHONE_CALL_END:
+        ilf_ui_notify_gone(2);
         break;
     case WEB_SCREEN_OFF:
         screen_off = true;

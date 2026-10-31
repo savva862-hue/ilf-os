@@ -92,6 +92,7 @@ static void test_ancs(void)
     CHECK(ilf_ancs_get_attributes(0x12345678, cmd, sizeof cmd) == 12);
     CHECK(cmd[0] == 0 && cmd[1] == 0x78 && cmd[4] == 0x12 && cmd[5] == 0 && cmd[6] == 1 && cmd[7] == 63 && cmd[9] == 3 && cmd[10] == 127);
     CHECK(ilf_ancs_get_attributes(1, cmd, 5) == 0);
+    CHECK(ilf_ancs_action(0x01020304, false, cmd) == 6 && cmd[0] == 2 && cmd[1] == 4 && cmd[4] == 1 && cmd[5] == 1);
 
     /* ответ: два уведомления подряд, режем на куски по 7 байт */
     uint8_t r[400]; size_t n = 0;

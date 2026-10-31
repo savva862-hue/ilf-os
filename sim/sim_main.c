@@ -230,6 +230,18 @@ int main(int argc, char **argv)
 
     ilf_ui_show_app(ILF_APP_PET, false); step(100);
     ilf_ui_show_app(ILF_APP_MUSIC, false); step(100); shot("15_app_music");
+
+    /* 12. iPhone: код, пульт музыки, уведомление и звонок */
+    ilf_ui_passkey(482913); step(100); shot("17_phone_passkey");
+    ilf_ui_passkey(-1);
+    ilf_ui_phone(true, "Ilf");
+    ilf_ui_music("Группа крови", "Кино", true); step(100); shot("18_phone_music");
+    ilf_ui_show_app(ILF_APP_PET, false);
+    ilf_ui_notify("Telegram", "Мама", "Ты поел? Не забудь шапку, на улице холодно", false, 1);
+    step(300); settle(); shot("19_phone_note");
+    step(7000);
+    ilf_ui_notify("Телефон", "Мама", NULL, true, 2); step(300); shot("20_phone_call");
+    ilf_ui_notify_gone(2); step(100);
     ilf_ui_show_app(ILF_APP_CLOCK, false); step(100); shot("16_app_clock");
     return 0;
 }

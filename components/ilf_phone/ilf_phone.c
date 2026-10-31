@@ -130,6 +130,14 @@ size_t ilf_ancs_get_attributes(uint32_t uid, uint8_t *o, size_t cap)
     return 12;
 }
 
+size_t ilf_ancs_action(uint32_t uid, bool positive, uint8_t *o)
+{
+    o[0] = 2;   /* Perform Notification Action */
+    o[1] = (uint8_t)uid; o[2] = (uint8_t)(uid >> 8); o[3] = (uint8_t)(uid >> 16); o[4] = (uint8_t)(uid >> 24);
+    o[5] = positive ? 0 : 1;
+    return 6;
+}
+
 void ilf_ancs_rx_reset(ilf_ancs_rx_t *rx) { rx->len = 0; }
 
 bool ilf_ancs_rx_feed(ilf_ancs_rx_t *rx, const uint8_t *d, size_t len, ilf_ancs_note_t *out)

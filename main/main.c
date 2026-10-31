@@ -1,5 +1,5 @@
 /*
- * ILF OS v0.2 — «Стадо».
+ * ILF OS v0.3 — «Стадо» и iPhone по Bluetooth.
  *
  * Потоки:
  *   ui-задача  — единственная, кто трогает LVGL: душа, лицо, часы, умный сон,
@@ -27,14 +27,16 @@
 #include "ilf_ui.h"
 #include "ilf_net.h"
 #include "ilf_voice.h"
+#include "ilf_ble.h"
 #include "esp_spiffs.h"
 #include "esp_system.h"
 #include "nvs.h"
 
 static const char *TAG = "ilf";
 
-/* Часовой пояс по умолчанию — Сеул. Позже его будет присылать iPhone по Bluetooth. */
+/* Часовой пояс по умолчанию — Сеул. Подключится iPhone — пришлёт свой, и мы его запомним. */
 #define ILF_DEFAULT_TZ "KST-9"
+static char s_tz[32] = ILF_DEFAULT_TZ;
 
 /* Экономия батареи: экран без дела приглушается, потом гаснет */
 #define BRIGHT_LEVEL        0xC0
@@ -87,6 +89,7 @@ static void factory_reset(void)
         if (nvs_open(spaces[i], NVS_READWRITE, &h) == ESP_OK) { nvs_erase_all(h); nvs_commit(h); nvs_close(h); }
     }
     esp_spiffs_format("storage");
+    ilf_ble_forget();
     esp_restart();
 }
 
@@ -314,7 +317,81 @@ static void on_setup(const ilf_setup_result_t *r, void *user)
     s_has_profile = true;
     ilf_herd_set_name(s_herd, s_profile.owner);
     ilf_ui_set_sheep_name(s_profile.sheep);
+    ilf_ble_set_name(s_profile.sheep);
+    ilf_ui_phone(ilf_ble_connected(), s_profile.sheep);
     ESP_LOGI(TAG, "хозяин %s, барашек %s", s_profile.owner, s_profile.sheep);
+}
+
+/* ---------------- iPhone по Bluetooth ---------------- */
+
+static const char *ble_name(void) { return s_has_profile ? s_profile.sheep : "ILF"; }
+
+static void ui_music(ilf_ui_music_btn_t btn, void *user)
+{
+    (void)user;
+    static const ilf_ams_cmd_t map[] = { ILF_AMS_PREV, ILF_AMS_TOGGLE, ILF_AMS_NEXT };
+    ilf_ble_music(map[btn]);
+}
+
+static void ui_call(uint32_t uid, bool accept, void *user)
+{
+    (void)user;
+    ilf_ble_call(uid, accept);
+}
+
+static void save_tz(const char *tz)
+{
+    if (!tz[0] || !strcmp(tz, s_tz)) return;
+    snprintf(s_tz, sizeof s_tz, "%s", tz);
+    nvs_handle_t h;
+    if (nvs_open("profile", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_str(h, "tz", s_tz);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+/* события с iPhone; true — разбудить экран */
+static bool phone_frame(uint32_t t)
+{
+    bool wake = false;
+    ilf_ble_event_t ev;
+    while (ilf_ble_poll(&ev)) {
+        switch (ev.type) {
+        case ILF_BLE_EV_STATE:
+            if (ev.state != ILF_BLE_PAIRING) ilf_ui_passkey(-1);
+            ilf_ui_phone(ev.state == ILF_BLE_CONNECTED, ble_name());
+            if (ev.state == ILF_BLE_CONNECTED) { pet_note("iPhone на связи", t); wake = true; }
+            break;
+        case ILF_BLE_EV_PASSKEY:
+            ilf_ui_passkey((int32_t)ev.passkey);
+            wake = true;
+            break;
+        case ILF_BLE_EV_TIME: {
+            save_tz(ev.tz);
+            /* в RTC — UTC, чтобы после перезагрузки без телефона часы шли верно */
+            time_t now = time(NULL);
+            struct tm utc;
+            gmtime_r(&now, &utc);
+            ilf_rtc_set(&utc);
+            break;
+        }
+        case ILF_BLE_EV_MUSIC:
+            ilf_ui_music(ev.music.title, ev.music.artist, ev.music.playing);
+            break;
+        case ILF_BLE_EV_NOTE: {
+            bool call = ev.category == ILF_ANCS_CAT_CALL;
+            ilf_ui_notify(ilf_phone_app_name(ev.note.app), ev.note.title, ev.note.message, call, ev.note.uid);
+            /* барашек замечает уведомление: смотрит наверх */
+            ilf_soul_handle(&s_soul, &(ilf_event_t){ .type = ILF_EV_TOUCH, .touch = { ILF_SCREEN_W / 2, 40 } }, t);
+            wake = true;
+            break;
+        }
+        case ILF_BLE_EV_NOTE_GONE:
+            ilf_ui_notify_gone(ev.uid);
+            break;
+        }
+    }
+    return wake;
 }
 
 /* ---------------- экран и душа ---------------- */
@@ -343,6 +420,10 @@ static void ui_task(void *arg)
     refresh_voice_list();
 
     profile_load();
+    ilf_ui_phone_cb_t pcb = { .music = ui_music, .call = ui_call };
+    ilf_ui_set_phone_cb(&pcb);
+    ilf_ui_phone(false, ble_name());
+    ilf_ble_init(ble_name());
     if (s_has_profile) {
         ilf_herd_set_name(s_herd, s_profile.owner);
         ilf_ui_set_sheep_name(s_profile.sheep);
@@ -387,6 +468,14 @@ static void ui_task(void *arg)
             factory_reset();
         }
         herd_frame(t);
+        if (phone_frame(t)) {
+            last_activity = t;
+            if (screen_off || dimmed) {
+                if (screen_off) lv_obj_invalidate(lv_screen_active());
+                screen_off = dimmed = false;
+                ilf_display_set_brightness(BRIGHT_LEVEL);
+            }
+        }
         ilf_soul_update(&s_soul, t);
 
         /* экономия: без дела экран сперва приглушается, потом гаснет совсем */
@@ -423,27 +512,32 @@ static void ui_task(void *arg)
 
 static void time_init(void)
 {
-    setenv("TZ", ILF_DEFAULT_TZ, 1);
-    tzset();
+    /* часовой пояс, который последний раз прислал iPhone */
+    nvs_handle_t h;
+    size_t len = sizeof s_tz;
+    if (nvs_open("profile", NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_str(h, "tz", s_tz, &len) != ESP_OK) snprintf(s_tz, sizeof s_tz, "%s", ILF_DEFAULT_TZ);
+        nvs_close(h);
+    }
     struct tm utc;
     if (ilf_rtc_init() == ESP_OK && ilf_rtc_get(&utc) == ESP_OK && utc.tm_year >= 125) {
         /* в RTC храним UTC */
         setenv("TZ", "UTC0", 1);
         tzset();
         time_t epoch = mktime(&utc);
-        setenv("TZ", ILF_DEFAULT_TZ, 1);
-        tzset();
         struct timeval tv = { .tv_sec = epoch };
         settimeofday(&tv, NULL);
         ESP_LOGI(TAG, "время взято из RTC");
     } else {
         ESP_LOGW(TAG, "в RTC нет времени, ждём iPhone");
     }
+    setenv("TZ", s_tz, 1);
+    tzset();
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "ILF OS v0.2 — стадо");
+    ESP_LOGI(TAG, "ILF OS v0.3 — стадо и iPhone");
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
