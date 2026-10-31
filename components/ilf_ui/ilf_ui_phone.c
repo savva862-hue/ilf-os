@@ -35,6 +35,8 @@ static struct {
     lv_timer_t *card_timer;
     uint32_t card_uid;
     bool card_call;
+    ilf_ui_ask_cb ask_cb;
+    void *ask_user;
 } ph;
 
 static lv_obj_t *mk_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, const char *text)
@@ -189,19 +191,27 @@ void ilf_ui_passkey(int32_t code)
 
 /* ---------- уведомление сверху ---------- */
 
+/* закрыть карточку; вопрос без ответа считается «не сейчас» */
+static void card_drop(void)
+{
+    if (ph.card) { lv_obj_delete(ph.card); ph.card = NULL; }
+    ph.card_call = false;
+    ilf_ui_ask_cb cb = ph.ask_cb;
+    ph.ask_cb = NULL;
+    if (cb) cb(-1, ph.ask_user);
+}
+
 static void card_close(void)
 {
     if (ph.card_timer) { lv_timer_delete(ph.card_timer); ph.card_timer = NULL; }
-    if (ph.card) { lv_obj_delete(ph.card); ph.card = NULL; }
-    ph.card_call = false;
+    card_drop();
 }
 
 static void card_timeout(lv_timer_t *t)
 {
     (void)t;
     ph.card_timer = NULL;   /* таймер одноразовый, LVGL удалит его сам */
-    if (ph.card) { lv_obj_delete(ph.card); ph.card = NULL; }
-    ph.card_call = false;
+    card_drop();
 }
 
 static void card_clicked(lv_event_t *e)
@@ -214,18 +224,36 @@ static void call_clicked(lv_event_t *e)
 {
     bool accept = lv_event_get_user_data(e) != NULL;
     uint32_t uid = ph.card_uid;
+    ilf_ui_ask_cb ask = ph.ask_cb;
+    ph.ask_cb = NULL;   /* ответили — card_close не должен звать «не сейчас» */
     card_close();
-    if (ph.cb.call) ph.cb.call(uid, accept, ph.cb.user);
+    if (ask) ask(accept ? 1 : 0, ph.ask_user);
+    else if (ph.cb.call) ph.cb.call(uid, accept, ph.cb.user);
 }
+
+static void build_card(const char *head_text, const char *title, const char *text, bool buttons);
 
 void ilf_ui_notify(const char *app, const char *title, const char *text, bool call, uint32_t uid)
 {
-    /* звонок не перебиваем обычным уведомлением */
-    if (ph.card_call && !call) return;
+    /* звонок и вопрос не перебиваем обычным уведомлением */
+    if ((ph.card_call || ph.ask_cb) && !call) return;
     card_close();
     ph.card_uid = uid;
     ph.card_call = call;
+    build_card(call ? "Звонок" : (app ? app : ""), title, text, call);
+}
 
+void ilf_ui_ask(const char *head, const char *title, const char *text, ilf_ui_ask_cb cb, void *user)
+{
+    card_close();
+    ph.card_call = true;   /* тап мимо кнопок не закрывает */
+    build_card(head, title, text, true);
+    ph.ask_cb = cb;
+    ph.ask_user = user;
+}
+
+static void build_card(const char *head_text, const char *title, const char *text, bool call)
+{
     lv_obj_t *c = ph.card = mk_box(lv_layer_top());
     lv_obj_set_width(c, ILF_SCREEN_W - 24);
     lv_obj_set_height(c, LV_SIZE_CONTENT);
@@ -242,7 +270,7 @@ void ilf_ui_notify(const char *app, const char *title, const char *text, bool ca
     lv_obj_add_event_cb(c, card_clicked, LV_EVENT_CLICKED, NULL);
 
     char head[64];
-    snprintf(head, sizeof head, LV_SYMBOL_BELL "  %s", call ? "Звонок" : (app ? app : ""));
+    snprintf(head, sizeof head, LV_SYMBOL_BELL "  %s", head_text);
     lv_obj_t *a = mk_label(c, &ilf_font_24, C_SOFT, head);
     lv_obj_set_width(a, LV_PCT(100));
     lv_label_set_long_mode(a, LV_LABEL_LONG_DOT);
@@ -252,7 +280,7 @@ void ilf_ui_notify(const char *app, const char *title, const char *text, bool ca
         lv_obj_set_width(t, LV_PCT(100));
         lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     }
-    if (!call && text && *text) {
+    if (text && *text) {
         lv_obj_t *m = mk_label(c, &ilf_font_24, C_SOFT, text);
         lv_obj_set_size(m, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_style_max_height(m, 64, 0);   /* две строки */

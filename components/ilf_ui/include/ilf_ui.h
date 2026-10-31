@@ -118,6 +118,11 @@ void ilf_ui_passkey(int32_t code);
 void ilf_ui_notify(const char *app, const char *title, const char *text, bool call, uint32_t uid);
 void ilf_ui_notify_gone(uint32_t uid);
 
+/* Вопрос карточкой сверху с кнопками «нет» и «да». answer: 1 — да, 0 — нет,
+   -1 — не ответили (карточка ушла сама через 45 с). */
+typedef void (*ilf_ui_ask_cb)(int answer, void *user);
+void ilf_ui_ask(const char *head, const char *title, const char *text, ilf_ui_ask_cb cb, void *user);
+
 /* Имя барашка в углу экрана питомца */
 void ilf_ui_set_sheep_name(const char *name);
 

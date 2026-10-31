@@ -28,6 +28,8 @@
 #include "ilf_net.h"
 #include "ilf_voice.h"
 #include "ilf_ble.h"
+#include "ilf_version.h"
+#include "esp_ota_ops.h"
 #include "esp_spiffs.h"
 #include "esp_system.h"
 #include "nvs.h"
@@ -271,6 +273,47 @@ static void ui_clear(void *user)
     ilf_herd_send_stroke(s_herd, s_target, &st, now_ms());
 }
 
+/* ---------------- обновление от друга ---------------- */
+
+static uint32_t s_reboot_at;
+
+static void on_ota_answer(int answer, void *user)
+{
+    (void)user;
+    ilf_net_ota_answer(answer);
+    if (answer > 0) pet_note("Обновляюсь…", now_ms());
+}
+
+static void on_ota(const ilf_ota_event_t *ev, void *user)
+{
+    (void)user;
+    uint32_t t = now_ms();
+    char buf[96];
+    switch (ev->type) {
+    case ILF_OTA_EV_OFFER: {
+        const char *who = name_by_mac(ev->mac);
+        char title[32];
+        snprintf(title, sizeof title, "ILF OS v%u", (unsigned)ev->version);
+        snprintf(buf, sizeof buf, "%s делится новой версией. Обновить?", who ? who : "Друг");
+        ilf_ui_ask("Обновление", title, buf, on_ota_answer, NULL);
+        post((ilf_event_t){ .type = ILF_EV_FRIEND_MESSAGE });   /* разбудить экран, барашек рад */
+        break;
+    }
+    case ILF_OTA_EV_PROGRESS:
+        snprintf(buf, sizeof buf, "Обновляюсь… %d%%", (int)(ev->progress * 100));
+        ilf_ui_pet_note(buf);
+        s_note_until = t + NOTE_MS;
+        break;
+    case ILF_OTA_EV_DONE:
+        pet_note("Обновился! Перезапускаюсь…", t);
+        s_reboot_at = t + 2500;
+        break;
+    case ILF_OTA_EV_FAILED:
+        pet_note("Обновление сорвалось, попробуем позже", t);
+        break;
+    }
+}
+
 /* раз в кадр: запись, отправка, подсказки */
 static void herd_frame(uint32_t t)
 {
@@ -413,6 +456,7 @@ static void ui_task(void *arg)
     ilf_ui_set_pet_touch_cb(on_pet_touch, NULL);
 
     s_herd = ilf_net_init(on_herd, NULL);
+    ilf_net_set_ota_cb(on_ota, NULL);
     ilf_ui_herd_cb_t cb = { .record = ui_record, .next_target = ui_next_target, .play = ui_play,
                             .stroke = ui_stroke, .clear = ui_clear };
     ilf_ui_set_herd_cb(&cb);
@@ -434,8 +478,16 @@ static void ui_task(void *arg)
     uint32_t last_clock = 0, last_activity = now_ms();
     bool screen_off = false, dimmed = false;
 
+    bool marked_valid = false;
     for (;;) {
         uint32_t t = now_ms();
+
+        /* новая прошивка прожила 30 с и не упала — оставляем её, иначе загрузчик откатит */
+        if (!marked_valid && t > 30000) {
+            marked_valid = true;
+            esp_ota_mark_app_valid_cancel_rollback();
+        }
+        if (s_reboot_at && (int32_t)(t - s_reboot_at) > 0) esp_restart();
 
         ilf_event_t ev;
         bool woke = ilf_touch_take_wake();
@@ -537,7 +589,7 @@ static void time_init(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "ILF OS v0.3 — стадо и iPhone");
+    ESP_LOGI(TAG, "ILF OS v%d — стадо, iPhone, обновления от друзей", ILF_FW_VERSION);
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();

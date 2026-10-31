@@ -242,6 +242,8 @@ int main(int argc, char **argv)
     step(7000);
     ilf_ui_notify("Телефон", "Мама", NULL, true, 2); step(300); shot("20_phone_call");
     ilf_ui_notify_gone(2); step(100);
+    ilf_ui_ask("Обновление", "ILF OS v4", "Мира делится новой версией. Обновить?", NULL, NULL);
+    step(300); shot("21_update_offer");
     ilf_ui_show_app(ILF_APP_CLOCK, false); step(100); shot("16_app_clock");
     return 0;
 }

@@ -92,6 +92,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
       <div class="btns">
         <button class="act" id="fvoice">Прислать голосовое</button>
         <button class="act" id="fdraw">Прислать рисунок</button>
+        <button class="act" id="fupd">Поделиться обновлением</button>
       </div>
     </div>
     <div class="group">
@@ -119,7 +120,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
 <script>
 (async () => {
   const W = 368, H = 448;
-  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8, phone: 10, pnote: 11, pcall: 12, pend: 13 };
+  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8, phone: 10, pnote: 11, pcall: 12, pend: 13, fupd: 14 };
   const toast = document.getElementById('toast');
   const canvas = document.getElementById('screen');
   const ctx = canvas.getContext('2d');
@@ -207,6 +208,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   on('bump', () => { wake(); e.ilf_web_event(EV.bump); });
   on('fvoice', () => { wake(); e.ilf_web_event(EV.fvoice); });
   on('fdraw', () => { wake(); e.ilf_web_event(EV.fdraw); });
+  on('fupd', () => { wake(); e.ilf_web_event(EV.fupd); });
   on('phone', () => { wake(); e.ilf_web_event(EV.phone); });
   on('pnote', () => { wake(); e.ilf_web_event(EV.pnote); });
   on('pcall', () => { wake(); e.ilf_web_event(EV.pcall); });

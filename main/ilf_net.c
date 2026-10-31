@@ -2,7 +2,11 @@
 
 #include <string.h>
 
+#include "esp_app_format.h"
 #include "esp_event.h"
+#include "esp_image_format.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_now.h"
@@ -13,6 +17,7 @@
 #include "mbedtls/ecdh.h"
 #include "mbedtls/sha256.h"
 #include "nvs.h"
+#include "ilf_version.h"
 
 static const char *TAG = "ilf_net";
 
@@ -38,6 +43,37 @@ static bool s_listen_wanted = true, s_listening = true;
 static uint32_t s_awake_until;
 static volatile bool s_got_packet;
 
+/* обновление от друзей */
+static ilf_ota_t s_ota;
+static ilf_net_ota_fn s_ota_fn;
+static void *s_ota_user;
+static const esp_partition_t *s_run_part, *s_new_part;
+static esp_ota_handle_t s_ota_h;
+
+/* Отчёты ESP-NOW об отправке приходят по порядку отправки, но не говорят, чья
+   это была отправка. Стаду важны только его собственные, поэтому помечаем. */
+#define TAGS 64
+static uint8_t s_tags[TAGS];
+static volatile unsigned s_tag_head, s_tag_tail;
+static portMUX_TYPE s_tag_mux = portMUX_INITIALIZER_UNLOCKED;
+enum { TAG_HERD = 0, TAG_OTA = 1 };
+
+static void tag_push(uint8_t t)
+{
+    portENTER_CRITICAL(&s_tag_mux);
+    if (s_tag_head - s_tag_tail < TAGS) s_tags[s_tag_head++ % TAGS] = t;
+    portEXIT_CRITICAL(&s_tag_mux);
+}
+
+static uint8_t tag_pop(void)
+{
+    uint8_t t = TAG_HERD;
+    portENTER_CRITICAL_ISR(&s_tag_mux);
+    if (s_tag_tail != s_tag_head) t = s_tags[s_tag_tail++ % TAGS];
+    portEXIT_CRITICAL_ISR(&s_tag_mux);
+    return t;
+}
+
 /* ---------- радио (колбэки из задачи Wi-Fi → очередь) ---------- */
 
 static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
@@ -53,6 +89,7 @@ static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int le
 static void sent_cb(const uint8_t *mac, esp_now_send_status_t st)
 {
     (void)mac;
+    if (tag_pop() == TAG_OTA) return;   /* куски прошивки: отчёт не нужен, получатель переспросит сам */
     net_msg_t m = { .sent = true, .ok = st == ESP_NOW_SEND_SUCCESS };
     xQueueSend(s_q, &m, 0);
 }
@@ -61,7 +98,11 @@ static void io_send(void *ctx, const uint8_t *mac, const uint8_t *data, size_t l
 {
     (void)ctx;
     static const uint8_t bcast[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    tag_push(TAG_HERD);
     if (esp_now_send(mac ? mac : bcast, data, len) != ESP_OK) {
+        portENTER_CRITICAL(&s_tag_mux);
+        if (s_tag_head != s_tag_tail) s_tag_head--;
+        portEXIT_CRITICAL(&s_tag_mux);
         net_msg_t m = { .sent = true, .ok = false };
         xQueueSend(s_q, &m, 0);
     }
@@ -174,13 +215,96 @@ static void io_event(void *ctx, const ilf_herd_event_t *ev)
     if (s_fn) s_fn(ev, s_user);
 }
 
+/* ---------- обновление прошивки от друга ---------- */
+
+static bool ota_send(void *u, const uint8_t mac[6], const uint8_t *d, size_t n)
+{
+    (void)u;
+    tag_push(TAG_OTA);
+    if (esp_now_send(mac, d, n) == ESP_OK) return true;
+    portENTER_CRITICAL(&s_tag_mux);
+    if (s_tag_head != s_tag_tail) s_tag_head--;
+    portEXIT_CRITICAL(&s_tag_mux);
+    return false;
+}
+
+static bool ota_read(void *u, uint32_t off, uint8_t *buf, size_t n)
+{
+    (void)u;
+    return esp_partition_read(s_run_part, off, buf, n) == ESP_OK;
+}
+
+static bool ota_begin(void *u, uint32_t size)
+{
+    (void)u;
+    s_new_part = esp_ota_get_next_update_partition(NULL);
+    if (!s_new_part || size > s_new_part->size) return false;
+    ESP_LOGI(TAG, "принимаю прошивку %lu байт в %s", (unsigned long)size, s_new_part->label);
+    return esp_ota_begin(s_new_part, size, &s_ota_h) == ESP_OK;
+}
+
+static bool ota_write(void *u, const uint8_t *d, size_t n)
+{
+    (void)u;
+    return esp_ota_write(s_ota_h, d, n) == ESP_OK;
+}
+
+static bool ota_finish(void *u, const uint8_t sha[32])
+{
+    (void)u;
+    /* esp_ota_end сам проверяет образ по встроенному хешу; дальше сверяем этот хеш с обещанным другом */
+    if (esp_ota_end(s_ota_h) != ESP_OK) { ESP_LOGW(TAG, "образ от друга битый"); return false; }
+    uint8_t got[32];
+    if (esp_partition_get_sha256(s_new_part, got) != ESP_OK || memcmp(got, sha, 32) != 0) {
+        ESP_LOGW(TAG, "хеш прошивки не совпал");
+        return false;
+    }
+    return esp_ota_set_boot_partition(s_new_part) == ESP_OK;
+}
+
+static void ota_abort(void *u)
+{
+    (void)u;
+    esp_ota_abort(s_ota_h);
+}
+
+static void ota_event(void *u, const ilf_ota_event_t *ev)
+{
+    (void)u;
+    if (s_ota_fn) s_ota_fn(ev, s_ota_user);
+}
+
+static void ota_init(void)
+{
+    ilf_ota_image_t mine = { .version = ILF_FW_VERSION };
+    s_run_part = esp_ota_get_running_partition();
+    esp_image_metadata_t md;
+    const esp_partition_pos_t pos = { .offset = s_run_part->address, .size = s_run_part->size };
+    if (esp_image_verify(ESP_IMAGE_VERIFY_SILENT, &pos, &md) == ESP_OK &&
+        esp_partition_get_sha256(s_run_part, mine.sha) == ESP_OK) {
+        mine.size = md.image_len;
+    } else {
+        ESP_LOGW(TAG, "свою прошивку не прочитать — раздавать друзьям не будем");
+    }
+    ilf_ota_io_t io = { ota_send, ota_read, ota_begin, ota_write, ota_finish, ota_abort, ota_event, NULL };
+    ilf_ota_init(&s_ota, &io, &mine);
+    ESP_LOGI(TAG, "ILF OS v%d, образ %lu байт", ILF_FW_VERSION, (unsigned long)mine.size);
+}
+
+void ilf_net_set_ota_cb(ilf_net_ota_fn fn, void *user) { s_ota_fn = fn; s_ota_user = user; }
+void ilf_net_ota_answer(int answer)
+{
+    if (answer > 0) ilf_ota_accept(&s_ota, s_now);
+    else ilf_ota_decline(&s_ota, answer == 0);
+}
+
 /* ---------- запуск ---------- */
 
 ilf_herd_t *ilf_net_init(ilf_net_event_fn fn, void *user)
 {
     s_fn = fn;
     s_user = user;
-    s_q = xQueueCreate(24, sizeof(net_msg_t));
+    s_q = xQueueCreate(40, sizeof(net_msg_t));
 
     esp_event_loop_create_default();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -213,6 +337,7 @@ ilf_herd_t *ilf_net_init(ilf_net_event_fn fn, void *user)
     };
     s_herd = ilf_herd_create(&io, mac, s_name);
     load_friends();
+    ota_init();
     ESP_LOGI(TAG, "стадо готово: %s, канал %d", s_name, CHANNEL);
     return s_herd;
 }
@@ -223,15 +348,23 @@ void ilf_net_poll(uint32_t now_ms)
     net_msg_t m;
     while (xQueueReceive(s_q, &m, 0) == pdTRUE) {
         if (m.sent) ilf_herd_on_sent(s_herd, m.ok, now_ms);
-        else ilf_herd_on_recv(s_herd, m.mac, m.data, m.len, now_ms);
+        else if (ilf_herd_find_friend(s_herd, m.mac) >= 0) {
+            /* друг рядом: сказать ему свою версию (раз в 10 минут) */
+            ilf_ota_seen(&s_ota, m.mac, now_ms);
+            if (m.data[0] == ILF_OTA_MAGIC) ilf_ota_on_recv(&s_ota, m.mac, m.data, m.len, now_ms);
+            else ilf_herd_on_recv(s_herd, m.mac, m.data, m.len, now_ms);
+        } else if (m.data[0] != ILF_OTA_MAGIC) {
+            ilf_herd_on_recv(s_herd, m.mac, m.data, m.len, now_ms);
+        }
     }
     ilf_herd_tick(s_herd, now_ms);
+    ilf_ota_tick(&s_ota, now_ms);
 
     if (s_got_packet) {
         s_got_packet = false;
         s_awake_until = now_ms + ILF_NET_STAY_AWAKE_MS;
     }
-    bool listen = s_listen_wanted || ilf_herd_sending(s_herd) || ilf_herd_pairing(s_herd) ||
+    bool listen = s_listen_wanted || ilf_herd_sending(s_herd) || ilf_ota_busy(&s_ota) || ilf_herd_pairing(s_herd) ||
                   (int32_t)(s_awake_until - now_ms) > 0;
     if (listen != s_listening) {
         s_listening = listen;

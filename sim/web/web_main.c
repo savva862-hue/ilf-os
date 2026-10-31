@@ -122,6 +122,17 @@ static void cb_call(uint32_t uid, bool accept, void *u)
     note(accept ? "Звонок принят на iPhone" : "Звонок отклонён");
 }
 
+/* ---------- игрушечное обновление от Миры ---------- */
+
+static uint32_t upd_started;
+
+static void on_update(int answer, void *u)
+{
+    (void)u;
+    if (answer > 0) upd_started = now_ms;
+    else if (answer == 0) note("Ладно, останемся на этой версии");
+}
+
 /* ---------- LVGL ---------- */
 
 static uint32_t tick_cb(void) { return now_ms; }
@@ -201,6 +212,12 @@ EXPORT(ilf_web_frame) int ilf_web_frame(uint32_t dt)
     if (play_until && (int32_t)(now_ms - play_until) > 0) { play_until = 0; refresh_target(); }
     if (idle_at && (int32_t)(now_ms - idle_at) > 0) { idle_at = 0; refresh_target(); }
     if (note_until && (int32_t)(now_ms - note_until) > 0) note(NULL);
+    if (upd_started) {
+        uint32_t el = now_ms - upd_started;
+        char buf[48];
+        if (el < 6000) { snprintf(buf, sizeof buf, "Обновляюсь… %d%%", (int)(el / 60)); ilf_ui_pet_note(buf); note_until = now_ms + 1000; }
+        else { upd_started = 0; note("Обновился! (в тестере понарошку)"); }
+    }
     if (pair_until && (int32_t)(now_ms - pair_until) > 0) {
         /* «ввёл код на iPhone» */
         pair_until = 0;
@@ -218,7 +235,7 @@ EXPORT(ilf_web_frame) int ilf_web_frame(uint32_t dt)
 
 /* кнопки на странице */
 enum { WEB_SHAKE = 1, WEB_BUMP, WEB_FRIEND_VOICE, WEB_FRIEND_DRAW, WEB_BATTERY_LOW, WEB_BATTERY_OK,
-       WEB_SCREEN_OFF, WEB_SCREEN_ON, WEB_RESET, WEB_PHONE, WEB_PHONE_NOTE, WEB_PHONE_CALL, WEB_PHONE_CALL_END };
+       WEB_SCREEN_OFF, WEB_SCREEN_ON, WEB_RESET, WEB_PHONE, WEB_PHONE_NOTE, WEB_PHONE_CALL, WEB_PHONE_CALL_END, WEB_FRIEND_UPDATE };
 
 EXPORT(ilf_web_event) void ilf_web_event(int what)
 {
@@ -283,6 +300,11 @@ EXPORT(ilf_web_event) void ilf_web_event(int what)
         if (!phone_on) { note("Сначала подключи iPhone"); break; }
         ilf_ui_notify("Телефон", "Мама", NULL, true, 2);
         ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_TOUCH, .touch = { W / 2, 40 } }, now_ms);
+        break;
+    case WEB_FRIEND_UPDATE:
+        if (!has_friend) { note("Сначала подружись: «Стукнуться»"); break; }
+        ilf_ui_ask("Обновление", "ILF OS v4", "Мира делится новой версией. Обновить?", on_update, NULL);
+        ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_FRIEND_MESSAGE }, now_ms);
         break;
     case WEB_PHONE_CALL_END:
         ilf_ui_notify_gone(2);
