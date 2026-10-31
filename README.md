@@ -68,4 +68,6 @@ cmake -S tests -B build/tests && cmake --build build/tests && ./build/tests/ilf_
   - время и часовой пояс с iPhone (CTS);
   - обновления по воздуху.
 
+Персонаж: `assets/character/ilf_sheep_reference.png`, экранная версия рисуется кодом в `components/ilf_ui/ilf_ui.c`, глаза — `tools/gen_eye.py`.
+
 Шрифт Nunito: SIL Open Font License, `assets/fonts/`.

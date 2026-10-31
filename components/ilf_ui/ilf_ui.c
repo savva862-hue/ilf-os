@@ -8,12 +8,17 @@ LV_FONT_DECLARE(ilf_font_24);
 LV_FONT_DECLARE(ilf_font_32);
 LV_FONT_DECLARE(ilf_font_48);
 LV_FONT_DECLARE(ilf_font_digits_120);
+LV_IMAGE_DECLARE(ilf_eye_big);
+LV_IMAGE_DECLARE(ilf_eye_small);
 
-/* Палитра: AMOLED-чёрный фон почти не тратит батарею */
+/* Палитра персонажа ILF: кремовая головка на AMOLED-чёрном */
 #define C_BG       0x000000
-#define C_WOOL     0xF5EFE4
-#define C_FACE     0x3A3442
-#define C_EYE      0xF5EFE4
+#define C_WOOL     0xF3EDE2   /* текст и светлые элементы */
+#define C_HEAD     0xEEE6D9   /* мордочка и шерсть */
+#define C_SHADE    0xDCD0BC   /* тени: линия шерсти, складки */
+#define C_EAR_IN   0xCDBBA2   /* внутренняя сторона уха */
+#define C_EYE      0x000000   /* глаза — чёрные овалы */
+#define C_MOUTH    0x93795A   /* носик-«Y» и рот */
 #define C_PUPIL    0x121016
 #define C_NOSE     0xF2A7B5
 #define C_GOLD     0xF2B84B
@@ -21,22 +26,24 @@ LV_FONT_DECLARE(ilf_font_digits_120);
 #define C_CARD     0x1E1A24
 #define C_TEAR     0x7EC8F2
 
-/* Геометрия лица (экран 368×448) */
-#define FACE_CX 184
-#define FACE_CY 252
-#define EYE_W 36
-#define EYE_H 44
-#define PUPIL 20
-#define EYE_L_CX 156
-#define EYE_R_CX 212
-#define EYE_CY 236
+/* Геометрия по референсу assets/character/ilf_sheep_reference.png (масштаб 0.38) */
+#define HEAD_CX 184
+#define HEAD_CY 214
+#define HEAD_W  238
+#define HEAD_H  206
+#define EYE_W   42
+#define EYE_H   84
+#define EYE_L_CX 112
+#define EYE_R_CX 256
+#define EYE_CY  222
+#define NOSE_Y  246
 
 typedef struct {
-    lv_obj_t *eye;
-    lv_obj_t *pupil;
-    lv_obj_t *shine;
-    lv_obj_t *lid;
-    lv_obj_t *closed; /* закрытый глаз: дужка «︶» */
+    lv_obj_t *eye;     /* чёрный овал */
+    lv_obj_t *lid;     /* верхнее веко цвета мордочки */
+    lv_obj_t *cheek;   /* нижнее веко: глаза «улыбаются» */
+    lv_obj_t *closed;  /* закрытый глаз: дужка */
+    int cx;
 } eye_t;
 
 static struct {
@@ -48,7 +55,6 @@ static struct {
     eye_t eyes[2];
     lv_obj_t *smile;     /* дуга вниз */
     lv_obj_t *frown;     /* дуга вверх */
-    lv_obj_t *flat;      /* ровный рот */
     lv_obj_t *mouth_o;   /* открытый рот */
     lv_obj_t *zzz;
     lv_obj_t *tear;
@@ -96,7 +102,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, 
     return l;
 }
 
-static lv_obj_t *mouth_arc(lv_obj_t *parent, int cx, int cy, int size, int start, int end)
+static lv_obj_t *arc_line(lv_obj_t *parent, int cx, int cy, int size, int start, int end, uint32_t color, int width)
 {
     lv_obj_t *a = lv_arc_create(parent);
     lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
@@ -105,8 +111,8 @@ static lv_obj_t *mouth_arc(lv_obj_t *parent, int cx, int cy, int size, int start
     lv_obj_set_pos(a, cx - size / 2, cy - size / 2);
     lv_arc_set_bg_angles(a, start, end);
     lv_arc_set_value(a, 0);
-    lv_obj_set_style_arc_color(a, lv_color_hex(C_WOOL), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(a, 5, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(a, lv_color_hex(color), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(a, width, LV_PART_MAIN);
     lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
     lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, 0);
@@ -147,19 +153,49 @@ static void pet_clicked(lv_event_t *e)
     ui.touch_cb((int16_t)p.x, (int16_t)p.y, ui.touch_user);
 }
 
+static lv_obj_t *lid_rect(lv_obj_t *parent)
+{
+    lv_obj_t *r = plain(parent);
+    lv_obj_set_style_bg_color(r, lv_color_hex(C_HEAD), 0);
+    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
+    lv_obj_set_size(r, EYE_W, 0);
+    return r;
+}
+
 static void make_eye(eye_t *eye, lv_obj_t *parent, int cx)
 {
-    eye->eye = blob(parent, cx, EYE_CY, EYE_W, EYE_H, C_EYE);
-    lv_obj_set_style_clip_corner(eye->eye, true, 0); /* веко и зрачок не вылезают за глаз */
-    eye->pupil = blob(eye->eye, EYE_W / 2, EYE_H / 2 + 4, PUPIL, PUPIL, C_PUPIL);
-    eye->shine = blob(eye->eye, EYE_W / 2 + 4, EYE_H / 2, 6, 6, C_EYE);
-    eye->lid = plain(eye->eye);
-    lv_obj_set_style_bg_color(eye->lid, lv_color_hex(C_FACE), 0);
-    lv_obj_set_style_bg_opa(eye->lid, LV_OPA_COVER, 0);
-    lv_obj_set_size(eye->lid, EYE_W, 0);
-    lv_obj_set_pos(eye->lid, 0, 0);
-    eye->closed = mouth_arc(parent, cx, EYE_CY - 6, 30, 20, 160);
+    eye->cx = cx;
+    /* глаз — сглаженный эллипс-картинка; веки — прямоугольники цвета мордочки поверх:
+       за краем глаза они сливаются с мордочкой, поэтому их не видно */
+    eye->eye = lv_image_create(parent);
+    lv_image_set_src(eye->eye, &ilf_eye_big);
+    lv_obj_remove_flag(eye->eye, LV_OBJ_FLAG_CLICKABLE);
+    eye->lid = lid_rect(parent);
+    eye->cheek = lid_rect(parent);
+    eye->closed = arc_line(parent, cx, EYE_CY - 8, 44, 25, 155, C_PUPIL, 6);
     lv_obj_add_flag(eye->closed, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Висячее ухо: кремовый овал с бежевой серединкой, повёрнутый вниз-наружу. */
+static void make_ear(lv_obj_t *parent, int cx, int cy, int angle_deci)
+{
+    lv_obj_t *ear = blob(parent, cx, cy, 92, 46, C_HEAD);
+    lv_obj_t *in = blob(ear, 50, 23, 64, 26, C_EAR_IN);
+    (void)in;
+    lv_obj_set_style_transform_pivot_x(ear, 46, 0);
+    lv_obj_set_style_transform_pivot_y(ear, 23, 0);
+    lv_obj_set_style_transform_rotation(ear, angle_deci, 0);
+}
+
+static lv_obj_t *nose_line(lv_obj_t *parent, const lv_point_precise_t *pts, uint32_t n)
+{
+    lv_obj_t *l = lv_line_create(parent);
+    lv_line_set_points(l, pts, n);
+    lv_obj_set_style_line_color(l, lv_color_hex(C_MOUTH), 0);
+    lv_obj_set_style_line_width(l, 3, 0);
+    lv_obj_set_style_line_rounded(l, true, 0);
+    lv_obj_set_pos(l, HEAD_CX - 8, NOSE_Y);
+    return l;
 }
 
 static void build_pet(lv_obj_t *tile)
@@ -169,45 +205,54 @@ static void build_pet(lv_obj_t *tile)
     lv_obj_add_flag(ui.stage, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(ui.stage, pet_clicked, LV_EVENT_CLICKED, NULL);
 
-    /* шерсть: облако из кружков */
-    static const int16_t wool[][3] = {
-        {184, 150, 58}, {124, 176, 50}, {244, 176, 50}, {104, 236, 46}, {264, 236, 46},
-        {130, 296, 48}, {238, 296, 48}, {184, 316, 56}, {184, 226, 70},
+    /* уши — под головой, висят вниз-наружу */
+    make_ear(ui.stage, 50, 210, 3150);  /* 315° = наклон влево-вниз */
+    make_ear(ui.stage, 318, 210, 450);
+
+    /* кудрявая макушка: бугорки по верхнему краю */
+    static const int16_t curls[][3] = {
+        {96, 160, 34}, {128, 128, 36}, {168, 114, 38}, {208, 114, 38}, {246, 126, 36}, {276, 156, 34},
     };
-    for (size_t i = 0; i < sizeof wool / sizeof wool[0]; i++) {
-        blob(ui.stage, wool[i][0], wool[i][1], wool[i][2] * 2, wool[i][2] * 2, C_WOOL);
+    for (size_t i = 0; i < sizeof curls / sizeof curls[0]; i++) {
+        blob(ui.stage, curls[i][0], curls[i][1], curls[i][2] * 2, curls[i][2] * 2, C_HEAD);
     }
-    /* уши и морда */
-    blob(ui.stage, 98, 218, 76, 36, C_FACE);
-    blob(ui.stage, 270, 218, 76, 36, C_FACE);
-    blob(ui.stage, FACE_CX, FACE_CY, 144, 176, C_FACE);
+    /* голова: широкая снизу, как у референса */
+    blob(ui.stage, HEAD_CX, HEAD_CY, HEAD_W, HEAD_H, C_HEAD);
+    blob(ui.stage, HEAD_CX, HEAD_CY + 34, HEAD_W - 8, HEAD_H - 70, C_HEAD);
+
+    /* шерсть: волнистая линия чёлки и пара завитков на макушке */
+    static const int16_t fringe[][2] = {
+        {122, 152}, {160, 146}, {198, 145}, {236, 148}, {272, 156},
+    };
+    for (size_t i = 0; i < sizeof fringe / sizeof fringe[0]; i++) {
+        arc_line(ui.stage, fringe[i][0], fringe[i][1], 44, 20, 160, C_SHADE, 3);
+    }
 
     make_eye(&ui.eyes[0], ui.stage, EYE_L_CX);
     make_eye(&ui.eyes[1], ui.stage, EYE_R_CX);
 
-    blob(ui.stage, FACE_CX, 292, 32, 20, C_NOSE);
+    /* носик-«Y» */
+    static const lv_point_precise_t y_left[]  = {{1, 1}, {8, 7}};
+    static const lv_point_precise_t y_right[] = {{15, 1}, {8, 7}};
+    static const lv_point_precise_t y_stem[]  = {{8, 7}, {8, 15}};
+    nose_line(ui.stage, y_left, 2);
+    nose_line(ui.stage, y_right, 2);
+    nose_line(ui.stage, y_stem, 2);
 
-    ui.smile = mouth_arc(ui.stage, FACE_CX, 300, 36, 30, 150);
-    ui.frown = mouth_arc(ui.stage, FACE_CX, 334, 36, 210, 330);
-    ui.flat = plain(ui.stage);
-    lv_obj_set_size(ui.flat, 26, 5);
-    lv_obj_set_pos(ui.flat, FACE_CX - 13, 314);
-    lv_obj_set_style_radius(ui.flat, 3, 0);
-    lv_obj_set_style_bg_color(ui.flat, lv_color_hex(C_WOOL), 0);
-    lv_obj_set_style_bg_opa(ui.flat, LV_OPA_COVER, 0);
-    ui.mouth_o = blob(ui.stage, FACE_CX, 318, 18, 22, C_PUPIL);
-    lv_obj_set_style_border_color(ui.mouth_o, lv_color_hex(C_WOOL), 0);
-    lv_obj_set_style_border_width(ui.mouth_o, 3, 0);
+    /* рты под носиком: появляются по эмоции */
+    ui.smile = arc_line(ui.stage, HEAD_CX, NOSE_Y + 10, 28, 30, 150, C_MOUTH, 3);
+    ui.frown = arc_line(ui.stage, HEAD_CX, NOSE_Y + 34, 28, 210, 330, C_MOUTH, 3);
+    ui.mouth_o = blob(ui.stage, HEAD_CX, NOSE_Y + 26, 12, 14, C_MOUTH);
 
-    ui.tear = blob(ui.stage, 140, 272, 10, 16, C_TEAR);
-    ui.sweat = blob(ui.stage, 250, 200, 12, 18, C_TEAR);
+    ui.tear = blob(ui.stage, EYE_L_CX + 4, EYE_CY + 54, 10, 16, C_TEAR);
+    ui.sweat = blob(ui.stage, 282, 150, 12, 18, C_TEAR);
     ui.zzz = label(ui.stage, &ilf_font_32, C_GOLD, "z z Z");
-    lv_obj_set_pos(ui.zzz, 250, 96);
+    lv_obj_set_pos(ui.zzz, 256, 70);
 
     ui.status = label(ui.stage, &ilf_font_24, C_MUTED, "");
     lv_obj_set_width(ui.status, ILF_SCREEN_W);
     lv_obj_set_style_text_align(ui.status, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(ui.status, 0, 380);
+    lv_obj_set_pos(ui.status, 0, 372);
 
     ui.last_emotion = ILF_EMO_COUNT;
 }
@@ -216,28 +261,42 @@ void ilf_ui_update_face(const ilf_face_t *f)
 {
     if (!ui.stage || !f) return;
 
+    /* у персонажа нет зрачков: взгляд — это лёгкий сдвиг самих глаз */
+    int dx = (int)(f->gaze_x * 6.0f);
+    int dy = (int)(f->gaze_y * 5.0f);
+    bool happy = f->emotion == ILF_EMO_HAPPY;
+    bool scared = f->emotion == ILF_EMO_SCARED;
+    int h = scared ? EYE_H - 14 : EYE_H; /* испуганный — глаза-точки поменьше */
+    int w = scared ? EYE_W - 8 : EYE_W;
+
     for (int i = 0; i < 2; i++) {
         eye_t *e = &ui.eyes[i];
-        int px = EYE_W / 2 + (int)(f->gaze_x * 7.0f);
-        int py = EYE_H / 2 + (int)(f->gaze_y * 9.0f);
-        lv_obj_set_pos(e->pupil, px - PUPIL / 2, py - PUPIL / 2);
-        lv_obj_set_pos(e->shine, px + 1, py - 6);
-        lv_obj_set_height(e->lid, (int32_t)(f->eyelid * EYE_H + 0.5f));
-        bool closed = f->eyelid > 0.92f; /* полностью закрытый глаз рисуем дужкой, без контура */
+        lv_image_set_src(e->eye, scared ? &ilf_eye_small : &ilf_eye_big);
+        int ex = e->cx - w / 2 + dx, ey = EYE_CY - h / 2 + dy;
+        lv_obj_set_pos(e->eye, ex, ey);
+        int lid = (int)(f->eyelid * h + 0.5f);
+        lv_obj_set_size(e->lid, w + 4, lid);
+        lv_obj_set_pos(e->lid, ex - 2, ey - 1);
+        int cheek = happy ? h * 32 / 100 : 0; /* радость: снизу поджимаются «щёчки» */
+        lv_obj_set_size(e->cheek, w + 4, cheek);
+        lv_obj_set_pos(e->cheek, ex - 2, ey + h - cheek + 1);
+        bool closed = f->eyelid > 0.92f;
         show(e->eye, !closed);
+        show(e->lid, !closed);
+        show(e->cheek, !closed);
         show(e->closed, closed);
+        lv_obj_set_pos(e->closed, e->cx - 22 + dx, EYE_CY - 30 + dy);
     }
 
     show(ui.smile, !f->mouth_open && f->mouth > 0.5f);
     show(ui.frown, !f->mouth_open && f->mouth < -0.5f);
-    show(ui.flat, !f->mouth_open && f->mouth >= -0.5f && f->mouth <= 0.5f);
     show(ui.mouth_o, f->mouth_open);
 
     if (f->emotion != ui.last_emotion) {
         ui.last_emotion = f->emotion;
         show(ui.zzz, f->emotion == ILF_EMO_ASLEEP || f->emotion == ILF_EMO_SLEEPY);
         show(ui.tear, f->emotion == ILF_EMO_SAD);
-        show(ui.sweat, f->emotion == ILF_EMO_SCARED);
+        show(ui.sweat, scared);
         const char *txt = "";
         switch (f->emotion) {
         case ILF_EMO_HUNGRY: txt = "Хочу кушать!"; break;
