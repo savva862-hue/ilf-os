@@ -1,0 +1,206 @@
+<title>Тестер барашка ILF</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800&display=swap">
+<style>
+/* Тёмный стол, на нём барашек в пластиковом корпусе; справа — пульт «что происходит с барашком» */
+:root {
+  color-scheme: dark;
+  --bg: #0e0d0c;
+  --panel: #1a1816;
+  --line: #2c2926;
+  --wool: #f3ede2;
+  --soft: #b8b0a4;
+  --pink: #f2a7b5;
+  --shell: #e9e2d6;
+  --font: "Nunito", "Segoe UI", system-ui, sans-serif;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--wool); font-family: var(--font); font-size: 15px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap {
+  max-width: 900px; margin: 0 auto; padding-block: 28px 40px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 36px; align-items: start;
+}
+@media (max-width: 760px) { .wrap { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 24px; } }
+
+.device {
+  background: var(--shell); padding: 18px; border-radius: 46px;
+  box-shadow: 0 30px 60px rgba(0,0,0,.55), inset 0 -6px 0 rgba(0,0,0,.08);
+  width: min(404px, 100%);
+}
+.screen {
+  display: block; width: 100%; aspect-ratio: 368 / 448; border-radius: 30px;
+  background: #000; touch-action: none; cursor: pointer; image-rendering: auto;
+}
+.device-foot { display: flex; justify-content: space-between; align-items: center; padding: 12px 10px 0; color: #6d665c; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.boot { width: 34px; height: 12px; border-radius: 6px; background: #cfc6b8; border: 0; cursor: pointer; }
+.boot:active { background: #b9af9f; }
+
+.side { min-width: 0; display: grid; gap: 22px; width: 100%; max-width: 420px; }
+h1 { font-size: 30px; font-weight: 800; margin: 0; text-wrap: balance; }
+.lead { color: var(--soft); margin: 6px 0 0; line-height: 1.5; }
+.group { display: grid; gap: 10px; }
+.group h2 { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+button.act {
+  font: 700 15px var(--font); color: var(--wool); background: var(--panel);
+  border: 1.5px solid var(--line); border-radius: 999px; padding: 9px 16px; cursor: pointer;
+}
+button.act:hover { border-color: var(--soft); }
+button.act:active { background: var(--line); }
+button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.tips { margin: 0; padding: 14px 16px; background: var(--panel); border-radius: 16px; color: var(--soft); line-height: 1.55; display: grid; gap: 4px; list-style: none; }
+.tips b { color: var(--wool); font-weight: 700; }
+.toast { min-height: 22px; color: var(--pink); font-weight: 700; }
+</style>
+
+<div class="wrap">
+  <div>
+    <div class="device">
+      <canvas id="screen" class="screen" width="368" height="448" tabindex="0" aria-label="Экран барашка, можно нажимать и смахивать мышкой"></canvas>
+      <div class="device-foot"><span>ILF</span><button class="boot" id="boot" title="Кнопка на боку: включить экран" aria-label="Кнопка барашка"></button></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div>
+      <h1>Тестер барашка ILF</h1>
+      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны, первый запуск и PIN. Радио, звук и второй барашек тут понарошку, их заменяют кнопки ниже.</p>
+    </div>
+
+    <ul class="tips">
+      <li><b>Нажми</b> на барашка, и он посмотрит туда и обрадуется.</li>
+      <li><b>Смахни</b> мышкой влево или вправо, чтобы листать приложения.</li>
+      <li><b>Зажми</b> кружок в «Голосовых», чтобы записать голосовое.</li>
+      <li><b>Рисуй</b> мышкой на холсте в «Рисунках».</li>
+    </ul>
+
+    <div class="group">
+      <h2>С барашком</h2>
+      <div class="btns">
+        <button class="act" id="shake">Встряхнуть</button>
+        <button class="act" id="bump">Стукнуться с другом</button>
+      </div>
+    </div>
+    <div class="group">
+      <h2>Подруга Мира</h2>
+      <div class="btns">
+        <button class="act" id="fvoice">Прислать голосовое</button>
+        <button class="act" id="fdraw">Прислать рисунок</button>
+      </div>
+    </div>
+    <div class="group">
+      <h2>Питание и экран</h2>
+      <div class="btns">
+        <button class="act" id="low">Батарея 12%</button>
+        <button class="act" id="ok">Батарея 83%</button>
+        <button class="act" id="off">Погасить экран</button>
+        <button class="act" id="restart">Начать заново</button>
+      </div>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+  </div>
+</div>
+
+<script>
+(async () => {
+  const W = 368, H = 448;
+  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8 };
+  const toast = document.getElementById('toast');
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+
+  let wasmBytes;
+  try {
+    const b64 = "__WASM_BASE64__";
+    const bin = atob(b64);
+    wasmBytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) wasmBytes[i] = bin.charCodeAt(i);
+  } catch (e) { toast.textContent = 'Не удалось распаковать прошивку.'; return; }
+
+  let e, mod;
+  try { mod = await WebAssembly.compile(wasmBytes); }
+  catch (err) { toast.textContent = 'Браузер не запускает WebAssembly: ' + err.message; return; }
+
+  let off = false;
+  async function boot() {
+    const inst = await WebAssembly.instantiate(mod, {});
+    e = inst.exports;
+    e.ilf_web_init((Math.random() * 1e9) >>> 0);
+    off = false;
+    tickClock(true);
+  }
+
+  function tickClock(force) {
+    const d = new Date();
+    const start = new Date(d.getFullYear(), 0, 1);
+    const yday = Math.floor((d - start) / 86400000);
+    e.ilf_web_clock(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getDay(), yday);
+  }
+
+  function draw() {
+    const p = e.ilf_web_fb();
+    const fb = new Uint8Array(e.memory.buffer, p, W * H * 4);
+    const out = img.data;
+    for (let i = 0; i < W * H * 4; i += 4) {   // LVGL: B G R A → холст: R G B A
+      out[i] = fb[i + 2]; out[i + 1] = fb[i + 1]; out[i + 2] = fb[i]; out[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  await boot();
+  let last = performance.now(), lastClock = 0;
+  function loop(t) {
+    const dt = Math.min(100, Math.max(1, Math.round(t - last)));
+    last = t;
+    if (e.ilf_web_frame(dt)) draw();
+    framesSinceDown++;
+    // быстрый клик: LVGL должен увидеть нажатие хотя бы пару кадров, иначе клик теряется
+    if (pendingUp && framesSinceDown >= 2) { pendingUp = false; e.ilf_web_pointer(pendingUp_x, pendingUp_y, 0); }
+    if (t - lastClock > 1000) { lastClock = t; tickClock(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // мышь и палец → тач барашка
+  function pos(ev) {
+    const r = canvas.getBoundingClientRect();
+    return [Math.round((ev.clientX - r.left) * W / r.width), Math.round((ev.clientY - r.top) * H / r.height)];
+  }
+  let down = false, framesSinceDown = 99, pendingUp = false, pendingUp_x = 0, pendingUp_y = 0;
+  canvas.addEventListener('pointerdown', ev => {
+    if (off) { wake(); return; }
+    down = true; canvas.setPointerCapture(ev.pointerId);
+    const [x, y] = pos(ev); e.ilf_web_pointer(x, y, 1);
+    framesSinceDown = 0; pendingUp = false;
+  });
+  canvas.addEventListener('pointermove', ev => { if (down) { const [x, y] = pos(ev); e.ilf_web_pointer(x, y, 1); } });
+  const up = ev => {
+    if (!down) return;
+    down = false;
+    const [x, y] = pos(ev);
+    if (framesSinceDown < 2) { pendingUp = true; pendingUp_x = x; pendingUp_y = y; e.ilf_web_pointer(x, y, 1); }
+    else e.ilf_web_pointer(x, y, 0);
+  };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+
+  function say(text) { toast.textContent = text; clearTimeout(say.t); say.t = setTimeout(() => toast.textContent = '', 3500); }
+  function wake() { if (!off) return; off = false; e.ilf_web_event(EV.on); }
+  const on = (id, fn) => document.getElementById(id).addEventListener('click', fn);
+  on('shake', () => { wake(); e.ilf_web_event(EV.shake); });
+  on('bump', () => { wake(); e.ilf_web_event(EV.bump); });
+  on('fvoice', () => { wake(); e.ilf_web_event(EV.fvoice); });
+  on('fdraw', () => { wake(); e.ilf_web_event(EV.fdraw); });
+  on('low', () => { wake(); e.ilf_web_event(EV.low); });
+  on('ok', () => { wake(); e.ilf_web_event(EV.ok); });
+  on('off', () => { off = true; e.ilf_web_event(EV.off); draw(); say('Экран погас. Нажми на экран или на кнопку сбоку, и барашек попросит PIN.'); });
+  on('restart', async () => { await boot(); say('Барашек как из коробки.'); });
+  document.getElementById('boot').addEventListener('click', wake);
+})();
+</script>
