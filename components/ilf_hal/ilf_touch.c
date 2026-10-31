@@ -6,6 +6,7 @@
 #include "ilf_board.h"
 
 #include "esp_check.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 
 static const char *TAG = "ilf_touch";
@@ -31,6 +32,25 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     }
 }
 
+/* Касание, пока экран погашен и LVGL не опрашивает тач: чип дёргает линию INT */
+static void IRAM_ATTR int_isr(void *arg)
+{
+    (void)arg;
+    s_wake = true;
+}
+
+static void int_init(void)
+{
+    gpio_config_t io = { .pin_bit_mask = 1ULL << ILF_TOUCH_INT, .mode = GPIO_MODE_INPUT,
+                         .pull_up_en = GPIO_PULLUP_ENABLE, .intr_type = GPIO_INTR_NEGEDGE };
+    gpio_config(&io);
+    esp_err_t err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return;
+    gpio_isr_handler_add(ILF_TOUCH_INT, int_isr, NULL);
+    /* и будит процессор из лёгкого сна */
+    gpio_wakeup_enable(ILF_TOUCH_INT, GPIO_INTR_LOW_LEVEL);
+}
+
 esp_err_t ilf_touch_init(lv_display_t *disp)
 {
     uint8_t addr = ilf_board_rev() == ILF_BOARD_V2_CO5300_CST820 ? ILF_ADDR_CST820 : ILF_ADDR_FT3168;
@@ -42,6 +62,7 @@ esp_err_t ilf_touch_init(lv_display_t *disp)
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, read_cb);
     lv_indev_set_display(indev, disp);
+    int_init();
     ESP_LOGI(TAG, "тач 0x%02x готов", addr);
     return ESP_OK;
 }

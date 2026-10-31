@@ -85,6 +85,8 @@ struct ilf_herd {
     uint16_t out_id;
     uint16_t out_total, out_idx;
     uint8_t  out_retries;
+    uint32_t out_target_ms;     /* когда начали слать этому другу */
+    uint32_t out_retry_at;      /* друг спит: следующая попытка не раньше */
     int      out_targets[ILF_HERD_MAX_FRIENDS];
     int      out_ntargets, out_target;
     uint16_t next_msg_id;
@@ -334,13 +336,15 @@ static void end_pairing(ilf_herd_t *h)
 
 /* ---------- сообщения ---------- */
 
-static void finish_target(ilf_herd_t *h, bool ok)
+static void finish_target(ilf_herd_t *h, bool ok, uint32_t now)
 {
     emit(h, (ilf_herd_event_t){ .type = ILF_HERD_EV_SENT, .friend_idx = h->out_targets[h->out_target],
                                 .msg_id = h->out_id, .ok = ok, .kind = (ilf_msg_kind_t)h->out_kind });
     h->out_target++;
     h->out_idx = 0;
     h->out_retries = 0;
+    h->out_target_ms = now;
+    h->out_retry_at = now;
     if (h->out_target >= h->out_ntargets) {
         free(h->out_buf);
         h->out_buf = NULL;
@@ -378,7 +382,7 @@ static void pump(ilf_herd_t *h, uint32_t now)
         h->io.send(h->io.ctx, f.broadcast ? NULL : f.mac, f.data, f.len);
         return;
     }
-    if (h->out_buf) send_chunk(h, now);
+    if (h->out_buf && diff_ms(now, h->out_retry_at) >= 0) send_chunk(h, now);
 }
 
 void ilf_herd_on_sent(ilf_herd_t *h, bool ok, uint32_t now)
@@ -388,9 +392,12 @@ void ilf_herd_on_sent(ilf_herd_t *h, bool ok, uint32_t now)
     if (h->tx_chunk && h->out_buf) {
         if (ok) {
             h->out_retries = 0;
-            if (++h->out_idx >= h->out_total) finish_target(h, true);
+            if (++h->out_idx >= h->out_total) finish_target(h, true, now);
+        } else if (h->out_idx == 0 && diff_ms(now, h->out_target_ms) < (int32_t)ILF_HERD_WAKE_MS) {
+            /* друг, наверное, дремлет: радио у него просыпается урывками — стучимся, пока не проснётся */
+            h->out_retry_at = now + ILF_HERD_WAKE_RETRY_MS;
         } else if (++h->out_retries > ILF_HERD_CHUNK_RETRIES) {
-            finish_target(h, false);
+            finish_target(h, false, now);
         }
     }
     pump(h, now);
@@ -417,6 +424,8 @@ uint16_t ilf_herd_send(ilf_herd_t *h, int friend_idx, ilf_msg_kind_t kind,
     h->out_retries = 0;
     h->out_ntargets = n;
     h->out_target = 0;
+    h->out_target_ms = now;
+    h->out_retry_at = now;
     if (++h->next_msg_id == 0) h->next_msg_id = 1;
     h->out_id = h->next_msg_id;
     pump(h, now);

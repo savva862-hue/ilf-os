@@ -34,12 +34,16 @@ static ilf_net_event_fn s_fn;
 static void *s_user;
 static char s_name[ILF_HERD_NAME_LEN];
 static uint32_t s_now;
+static bool s_listen_wanted = true, s_listening = true;
+static uint32_t s_awake_until;
+static volatile bool s_got_packet;
 
 /* ---------- радио (колбэки из задачи Wi-Fi → очередь) ---------- */
 
 static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
 {
     if (len <= 0 || len > ILF_HERD_MAX_FRAME) return;
+    s_got_packet = true;
     net_msg_t m = { .sent = false, .len = (uint8_t)len };
     memcpy(m.mac, info->src_addr, 6);
     memcpy(m.data, data, (size_t)len);
@@ -189,6 +193,10 @@ ilf_herd_t *ilf_net_init(ilf_net_event_fn fn, void *user)
     esp_now_set_pmk(PMK);
     esp_now_register_recv_cb(recv_cb);
     esp_now_register_send_cb(sent_cb);
+    /* экономный режим радио: окно приёма раз в секунду (включается в ilf_net_poll) */
+    esp_now_set_wake_window(ILF_NET_WAKE_WINDOW);
+    esp_wifi_connectionless_module_set_wake_interval(ILF_NET_WAKE_INTERVAL);
+    esp_wifi_set_ps(WIFI_PS_NONE);
     esp_now_peer_info_t b = { .channel = CHANNEL, .ifidx = WIFI_IF_STA, .encrypt = false };
     memset(b.peer_addr, 0xFF, 6);
     esp_now_add_peer(&b);
@@ -216,6 +224,20 @@ void ilf_net_poll(uint32_t now_ms)
         else ilf_herd_on_recv(s_herd, m.mac, m.data, m.len, now_ms);
     }
     ilf_herd_tick(s_herd, now_ms);
+
+    if (s_got_packet) {
+        s_got_packet = false;
+        s_awake_until = now_ms + ILF_NET_STAY_AWAKE_MS;
+    }
+    bool listen = s_listen_wanted || ilf_herd_sending(s_herd) || ilf_herd_pairing(s_herd) ||
+                  (int32_t)(s_awake_until - now_ms) > 0;
+    if (listen != s_listening) {
+        s_listening = listen;
+        esp_wifi_set_ps(listen ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
+        ESP_LOGI(TAG, "%s", listen ? "радио слушает" : "радио дремлет");
+    }
 }
+
+void ilf_net_keep_listening(bool on) { s_listen_wanted = on; }
 
 const char *ilf_net_my_name(void) { return s_name; }

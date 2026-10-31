@@ -32,9 +32,11 @@ static const char *TAG = "ilf";
 /* Часовой пояс по умолчанию — Сеул. Позже его будет присылать iPhone по Bluetooth. */
 #define ILF_DEFAULT_TZ "KST-9"
 
-/* Умный сон: через сколько после засыпания барашка гасить экран */
-#define DIM_LEVEL          0x30
-#define SCREEN_OFF_AFTER_MS 30000u
+/* Экономия батареи: экран без дела приглушается, потом гаснет */
+#define BRIGHT_LEVEL        0xC0
+#define DIM_LEVEL           0x30
+#define SCREEN_DIM_IDLE_MS  20000u
+#define SCREEN_OFF_IDLE_MS  30000u
 
 static QueueHandle_t s_events;
 static ilf_soul_t s_soul;
@@ -271,8 +273,8 @@ static void ui_task(void *arg)
     refresh_target();
     refresh_voice_list();
 
-    uint32_t last_clock = 0, asleep_since = 0;
-    bool screen_off = false;
+    uint32_t last_clock = 0, last_activity = now_ms();
+    bool screen_off = false, dimmed = false;
 
     for (;;) {
         uint32_t t = now_ms();
@@ -286,14 +288,41 @@ static void ui_task(void *arg)
             if (ev.type == ILF_EV_BATTERY) ilf_ui_update_battery(ev.battery.percent, ev.battery.charging);
             if (ev.type == ILF_EV_SHAKE || ev.type == ILF_EV_BUTTON || ev.type == ILF_EV_FRIEND_MESSAGE) woke = true;
         }
-        if (woke && screen_off) {
-            ilf_soul_handle(&s_soul, &(ilf_event_t){ .type = ILF_EV_BUTTON }, t);
+        /* пока пишем, слушаем или отправляем — экран не гаснет */
+        if (ilf_voice_recording() || ilf_voice_playing() || ilf_herd_sending(s_herd)) woke = true;
+        if (woke) {
+            last_activity = t;
+            if (screen_off || dimmed) {
+                if (screen_off && ilf_soul_is_asleep(&s_soul)) {
+                    ilf_soul_handle(&s_soul, &(ilf_event_t){ .type = ILF_EV_BUTTON }, t);
+                }
+                if (screen_off) lv_obj_invalidate(lv_screen_active());
+                screen_off = dimmed = false;
+                ilf_display_set_brightness(BRIGHT_LEVEL);
+            }
         }
 
         herd_frame(t);
         ilf_soul_update(&s_soul, t);
-        ilf_ui_update_face(ilf_soul_face(&s_soul));
 
+        /* экономия: без дела экран сперва приглушается, потом гаснет совсем */
+        uint32_t idle = t - last_activity;
+        if (!screen_off && idle > SCREEN_OFF_IDLE_MS) {
+            screen_off = true;
+            ilf_display_set_brightness(0);
+        } else if (!screen_off && !dimmed && idle > SCREEN_DIM_IDLE_MS) {
+            dimmed = true;
+            ilf_display_set_brightness(DIM_LEVEL);
+        }
+        ilf_net_keep_listening(!screen_off);
+
+        if (screen_off) {
+            /* экран тёмный: не рисуем, только душа, стадо и датчики */
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        ilf_ui_update_face(ilf_soul_face(&s_soul));
         if (t - last_clock >= 1000) {
             last_clock = t;
             time_t now = time(NULL);
@@ -302,24 +331,8 @@ static void ui_task(void *arg)
             ilf_ui_update_clock(&lt);
         }
 
-        /* умный сон: барашек уснул → приглушить, спит долго → погасить экран */
-        if (ilf_soul_is_asleep(&s_soul)) {
-            if (!asleep_since) {
-                asleep_since = t;
-                ilf_display_set_brightness(DIM_LEVEL);
-            } else if (!screen_off && t - asleep_since > SCREEN_OFF_AFTER_MS) {
-                screen_off = true;
-                ilf_display_set_brightness(0);
-            }
-        } else if (asleep_since) {
-            asleep_since = 0;
-            screen_off = false;
-            ilf_display_set_brightness(0xC0);
-        }
-
         uint32_t wait = lv_timer_handler();
         if (wait > 33) wait = 33;
-        if (screen_off) wait = 100; /* экран тёмный — просыпаемся реже */
         vTaskDelay(pdMS_TO_TICKS(wait ? wait : 1));
     }
 }
@@ -359,6 +372,7 @@ void app_main(void)
     time_init();
     if (ilf_audio_init() != ESP_OK) ESP_LOGW(TAG, "звук не поднялся, голосовые не работают");
     ilf_voice_init();
+    ilf_power_save_init();
 
     s_events = xQueueCreate(32, sizeof(ilf_event_t));
     xTaskCreatePinnedToCore(ui_task, "ui", 12288, NULL, 5, NULL, 1);

@@ -114,12 +114,16 @@ esp_err_t ilf_power_battery(uint8_t *percent, bool *charging);
 #define ILF_AUDIO_RATE 8000
 esp_err_t ilf_audio_init(void);
 bool   ilf_audio_ok(void);
+void   ilf_audio_begin(void);   /* включить I2S перед записью/проигрыванием */
+void   ilf_audio_end(void);     /* выключить — процессор сможет спать */
 void   ilf_audio_speaker(bool on);
 size_t ilf_audio_read(int16_t *pcm, size_t samples, uint32_t timeout_ms);
 size_t ilf_audio_write(const int16_t *pcm, size_t samples, uint32_t timeout_ms);
 
 /* --- кнопка BOOT --- */
 esp_err_t ilf_button_init(void);
+/* Экономия: частота процессора по нагрузке и лёгкий сон, будят тач, кнопка, радио. */
+void ilf_power_save_init(void);
 bool ilf_button_pressed(void);
 
 #ifdef __cplusplus

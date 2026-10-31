@@ -76,6 +76,9 @@ esp_err_t ilf_audio_init(void)
 
     vTaskDelay(pdMS_TO_TICKS(10)); /* кодеку нужен MCLK до настройки */
     ESP_RETURN_ON_ERROR(codec_init(), TAG, "codec");
+    /* без дела I2S выключен: включённый он не даёт процессору засыпать */
+    i2s_channel_disable(s_tx);
+    i2s_channel_disable(s_rx);
 
     gpio_config_t pa = { .pin_bit_mask = 1ULL << ILF_PA_EN, .mode = GPIO_MODE_OUTPUT };
     gpio_config(&pa);
@@ -86,6 +89,22 @@ esp_err_t ilf_audio_init(void)
 }
 
 bool ilf_audio_ok(void) { return s_ok; }
+
+void ilf_audio_begin(void)
+{
+    if (!s_ok) return;
+    i2s_channel_enable(s_tx);
+    i2s_channel_enable(s_rx);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    wr(0x00, 0x80);   /* такты вернулись — разбудить кодек */
+}
+
+void ilf_audio_end(void)
+{
+    if (!s_ok) return;
+    i2s_channel_disable(s_tx);
+    i2s_channel_disable(s_rx);
+}
 
 void ilf_audio_speaker(bool on)
 {

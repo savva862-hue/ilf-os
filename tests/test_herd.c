@@ -236,9 +236,23 @@ static void test_out_of_range_fails(void)
     deaf[1] = true;
     uint8_t msg[300] = {1};
     ilf_herd_send(nodes[0].h, 0, ILF_MSG_VOICE, msg, sizeof msg, now);
-    run(2000);
+    run(ILF_HERD_WAKE_MS + 1500);
     CHECK(nodes[0].sent_fail == 1 && nodes[0].sent_ok == 0);
     CHECK(!ilf_herd_sending(nodes[0].h));
+}
+
+static void test_wakes_sleeping_friend(void)
+{
+    reset(2);
+    pair_ab();
+    deaf[1] = true;                 /* радио друга дремлет */
+    uint8_t msg[700];
+    memset(msg, 0x33, sizeof msg);
+    ilf_herd_send(nodes[0].h, 0, ILF_MSG_VOICE, msg, sizeof msg, now);
+    run(900);
+    deaf[1] = false;                /* проснулось в своё окно */
+    run(1500);
+    CHECK(nodes[1].messages == 1 && nodes[0].sent_ok == 1);
 }
 
 static void test_stroke(void)
@@ -311,6 +325,7 @@ int main(void)
     test_voice_delivered_with_loss();
     test_voice_to_whole_herd();
     test_out_of_range_fails();
+    test_wakes_sleeping_friend();
     test_stroke();
     test_stranger_ignored();
     test_forget_and_reload();

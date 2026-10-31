@@ -131,3 +131,17 @@ esp_err_t ilf_button_init(void)
 }
 
 bool ilf_button_pressed(void) { return gpio_get_level(ILF_BOOT_BUTTON) == 0; }
+
+/* --- экономия: DFS + лёгкий сон --- */
+#include "esp_pm.h"
+#include "esp_sleep.h"
+
+void ilf_power_save_init(void)
+{
+    /* кнопка BOOT тоже будит из лёгкого сна (тач настраивает себя сам) */
+    gpio_wakeup_enable(ILF_BOOT_BUTTON, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    esp_pm_config_t pm = { .max_freq_mhz = 240, .min_freq_mhz = 40, .light_sleep_enable = true };
+    esp_err_t err = esp_pm_configure(&pm);
+    ESP_LOGI("ilf_power", "экономия питания: %s", err == ESP_OK ? "включена" : esp_err_to_name(err));
+}

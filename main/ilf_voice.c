@@ -106,8 +106,10 @@ static void audio_task(void *arg)
     for (;;) {
         cmd_t c;
         if (xQueueReceive(s_cmd, &c, portMAX_DELAY) != pdTRUE) continue;
+        ilf_audio_begin();
         if (c.type == CMD_REC_START) record();
         else if (c.type == CMD_PLAY) play(c.data, c.len);
+        ilf_audio_end();
     }
 }
 

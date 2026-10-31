@@ -40,6 +40,10 @@ extern "C" {
 /* Доставка: повторы одного пакета и сколько ждать недостающие куски */
 #define ILF_HERD_CHUNK_RETRIES     6u
 #define ILF_HERD_RX_TIMEOUT_MS  4000u
+/* Экономия батареи: радио друга без дела просыпается раз в ILF_NET_WAKE_INTERVAL (≈1 с).
+   Первый пакет сообщения повторяем столько, чтобы попасть в его окно. */
+#define ILF_HERD_WAKE_MS        2500u
+#define ILF_HERD_WAKE_RETRY_MS    40u
 
 typedef struct {
     uint8_t mac[6];
