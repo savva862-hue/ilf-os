@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 120 px
  * Bpp: 4
- * Opts: --no-compress --bpp 4 --size 120 --font Nunito-ExtraBold.ttf -r 0x30-0x3A --format lvgl --lv-include lvgl.h -o ../../components/ilf_ui/fonts/ilf_font_digits_120.c --lv-font-name ilf_font_digits_120
+ * Opts: --no-compress --bpp 4 --format lvgl --lv-include lvgl.h --size 120 --font assets/fonts/Nunito-ExtraBold.ttf -r 0x30-0x3A -o components/ilf_ui/fonts/ilf_font_digits_120.c --lv-font-name ilf_font_digits_120
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

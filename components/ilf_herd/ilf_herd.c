@@ -5,7 +5,7 @@
 
 /* ---- формат пакетов (всё little-endian) ----
  *  [0] 0xF1  [1] версия  [2] тип  [...] тело
- *  HELLO   : pub[32] bump_age_ms(u16) name[20]          — широковещательно
+ *  HELLO   : pub[32] bump_age_ms(u16) name[24]          — широковещательно
  *  CONFIRM : target_mac[6] proof[8]                     — широковещательно
  *  CHUNK   : msg_id(u16) idx(u16) total(u16) kind(u8) data[..229]   — другу, шифровано
  *  STROKE  : stroke_id(u8) flags(u8) n(u8) n×(x u16, y u16)         — другу, шифровано
@@ -109,6 +109,8 @@ static void copy_name(char *dst, const char *src)
 {
     size_t n = 0;
     while (src && n < ILF_HERD_NAME_LEN - 1 && src[n]) n++;
+    /* не резать русскую букву пополам */
+    if (src && src[n]) while (n > 0 && ((unsigned char)src[n] & 0xC0) == 0x80) n--;
     memcpy(dst, src ? src : "", n);
     dst[n] = 0;
 }
@@ -325,6 +327,8 @@ void ilf_herd_bump(ilf_herd_t *h, uint32_t now)
 }
 
 bool ilf_herd_pairing(const ilf_herd_t *h) { return h->bump_active; }
+
+void ilf_herd_set_name(ilf_herd_t *h, const char *name) { copy_name(h->my_name, name); }
 
 static void end_pairing(ilf_herd_t *h)
 {

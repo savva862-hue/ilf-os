@@ -295,6 +295,16 @@ static void test_forget_and_reload(void)
     CHECK(nodes[0].messages == 1);
 }
 
+static void test_long_russian_name_cut_safely(void)
+{
+    reset(2);
+    ilf_herd_set_name(nodes[0].h, "Константинопольский");   /* 19 букв = 38 байт */
+    pair_ab();
+    const ilf_friend_t *f = ilf_herd_friend(nodes[1].h, 0);
+    CHECK(f && strlen(f->name) == 22);                       /* 11 букв, без обрубка */
+    CHECK(f && strncmp(f->name, "Константино", 22) == 0);
+}
+
 static void test_adpcm(void)
 {
     int16_t pcm[ILF_ADPCM_BLOCK_SAMPLES * 4], out[ILF_ADPCM_BLOCK_SAMPLES];
@@ -329,6 +339,7 @@ int main(void)
     test_stroke();
     test_stranger_ignored();
     test_forget_and_reload();
+    test_long_russian_name_cut_safely();
     test_adpcm();
     if (failures) { printf("%d herd check(s) failed\n", failures); return 1; }
     printf("all herd tests passed\n");

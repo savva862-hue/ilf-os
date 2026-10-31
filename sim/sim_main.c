@@ -74,6 +74,34 @@ static void finger_read(lv_indev_t *i, lv_indev_data_t *d)
     d->state = finger_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
+static void tap(int x, int y)
+{
+    finger = (lv_point_t){ x, y }; finger_down = true; step(66);
+    finger_down = false; step(66);
+}
+static void swipe(int x0, int x1, int y)
+{
+    finger = (lv_point_t){ x0, y }; finger_down = true; step(33);
+    for (int i = 1; i <= 6; i++) { finger.x = x0 + (x1 - x0) * i / 6; step(17); }
+    finger_down = false; step(100);
+}
+/* клавиатура имён: 3 ряда букв (4 в ряд) + нижний ряд из 5 клавиш */
+static void key(int row, int col) { tap(8 + 41 + col * 90, 162 + 32 + row * 72); }
+static void kctl(int col) { tap(8 + 32 + col * 72, 162 + 32 + 3 * 72); }
+static void digit(int row, int col) { tap(19 + 52 + col * 113, 150 + 33 + row * 74); }
+
+static ilf_setup_result_t setup_res;
+static bool setup_done;
+static void on_setup(const ilf_setup_result_t *r, void *u) { (void)u; setup_res = *r; setup_done = true; }
+static char last_pin[8];
+static void on_pin(const char *pin, void *u)
+{
+    (void)u;
+    snprintf(last_pin, sizeof last_pin, "%s", pin);
+    if (strcmp(pin, "1234") == 0) ilf_ui_set_locked(false, NULL, NULL);
+    else ilf_ui_lock_message("Неверно, ещё 4 попытки");
+}
+
 static int strokes_sent, stroke_points;
 static void on_stroke(const ilf_stroke_t *st, void *user) { (void)user; strokes_sent++; stroke_points += st->count; }
 
@@ -110,6 +138,24 @@ int main(int argc, char **argv)
     t.tm_year = 2026 - 1900; t.tm_mon = 9; t.tm_mday = 31; t.tm_hour = 14; t.tm_min = 42;
     t.tm_wday = 6; t.tm_yday = 303;
     ilf_ui_update_clock(&t);
+
+    /* 0. Первый запуск: имя хозяина, имя барашка, PIN */
+    ilf_ui_setup_start(on_setup, NULL);
+    step(100); shot("00a_setup_hello");
+    tap(184, 448 - 28 - 30);                         /* «Дальше» */
+    kctl(1); key(1, 1);                              /* С */
+    kctl(0); key(0, 0); key(0, 2); key(0, 2); key(0, 0); /* а в в а */
+    step(100); shot("00b_setup_owner");
+    kctl(4);
+    key(0, 1); kctl(2); key(1, 2); key(0, 0); kctl(0); key(0, 0); /* Б я ш а */
+    kctl(4);
+    digit(0, 0); digit(0, 1); step(100); shot("00c_setup_pin");
+    digit(0, 2); digit(1, 0);
+    digit(0, 0); digit(0, 1); digit(0, 2); digit(1, 0);
+    step(100); shot("00d_setup_done");
+    tap(184, 448 - 20 - 30);                         /* «Начать» */
+    printf("setup: done=%d owner=%s sheep=%s pin=%s\n", setup_done, setup_res.owner, setup_res.sheep, setup_res.pin);
+    ilf_ui_set_sheep_name(setup_res.sheep);
 
     /* 1. Спокойный барашек */
     step(800); settle();
@@ -193,6 +239,15 @@ int main(int argc, char **argv)
     step(100);
     printf("draw: tile=%d strokes_sent=%d points=%d\n", (int)ilf_ui_current_app(), strokes_sent, stroke_points);
     shot("14_draw");
+
+    /* 11. Замок: смахнул — просит PIN, неверный — ругается, верный — открыл */
+    ilf_ui_show_app(ILF_APP_PET, false); step(100);
+    ilf_ui_set_locked(true, on_pin, NULL);
+    swipe(320, 60, 240);
+    digit(3, 1); digit(3, 1); digit(3, 1); digit(3, 1);
+    step(100); shot("14b_lock_wrong");
+    digit(0, 0); digit(0, 1); digit(0, 2); digit(1, 0);
+    printf("lock: last_pin=%s locked=%d\n", last_pin, ilf_ui_locked());
 
     ilf_ui_show_app(ILF_APP_MUSIC, false); step(100); shot("15_app_music");
     ilf_ui_show_app(ILF_APP_CLOCK, false); step(100); shot("16_app_clock");

@@ -5,6 +5,7 @@
 
 #include "ilf_clock.h"
 #include "ilf_soul.h"
+#include "ilf_lock.h"
 
 static int failures = 0;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); failures++; } } while (0)
@@ -133,6 +134,51 @@ static void test_time_wraparound(void)
     CHECK(ilf_soul_face(&s)->emotion == ILF_EMO_CALM);
 }
 
+/* игрушечный хеш для тестов замка (на плате — mbedtls SHA-256) */
+static void toy_sha(const uint8_t *d, size_t n, uint8_t out[32])
+{
+    for (int k = 0; k < 4; k++) {
+        uint64_t x = 1469598103934665603ULL + (uint64_t)k;
+        for (size_t i = 0; i < n; i++) { x ^= d[i]; x *= 1099511628211ULL; }
+        memcpy(out + k * 8, &x, 8);
+    }
+}
+
+static void test_lock(void)
+{
+    uint8_t salt[16] = { 1, 2, 3 };
+    ilf_pin_t pin;
+    ilf_lock_make_pin(&pin, "2580", salt, toy_sha);
+    ilf_lock_t l;
+    ilf_lock_init(&l, &pin);
+    uint32_t now = 1000;
+    CHECK(ilf_lock_is_locked(&l, now));
+    CHECK(ilf_lock_try(&l, "1111", now, toy_sha) == ILF_LOCK_WRONG);
+    CHECK(ilf_lock_try(&l, "25a0", now, toy_sha) == ILF_LOCK_WRONG);
+    CHECK(ilf_lock_try(&l, "2580", now, toy_sha) == ILF_LOCK_OK);
+    CHECK(!ilf_lock_is_locked(&l, now));
+    /* экран погас ненадолго — остаётся открытым */
+    ilf_lock_screen_off(&l, now);
+    now += 60000;
+    ilf_lock_screen_on(&l, now);
+    CHECK(!ilf_lock_is_locked(&l, now));
+    /* погас надолго — закрылся */
+    ilf_lock_screen_off(&l, now);
+    now += ILF_LOCK_GRACE_MS + 1;
+    ilf_lock_screen_on(&l, now);
+    CHECK(ilf_lock_is_locked(&l, now));
+    /* пять ошибок — пауза, даже верный PIN не принимается */
+    for (int i = 0; i < ILF_LOCK_TRIES - 1; i++) CHECK(ilf_lock_try(&l, "0000", now, toy_sha) == ILF_LOCK_WRONG);
+    CHECK(ilf_lock_try(&l, "0000", now, toy_sha) == ILF_LOCK_WAIT);
+    CHECK(ilf_lock_try(&l, "2580", now + 1000, toy_sha) == ILF_LOCK_WAIT);
+    CHECK(ilf_lock_wait_left(&l, now + 1000) == ILF_LOCK_WAIT_MS - 1000);
+    CHECK(ilf_lock_try(&l, "2580", now + ILF_LOCK_WAIT_MS, toy_sha) == ILF_LOCK_OK);
+    /* без PIN замка нет */
+    ilf_lock_t open;
+    ilf_lock_init(&open, NULL);
+    CHECK(!ilf_lock_is_locked(&open, now));
+}
+
 int main(void)
 {
     test_year_progress();
@@ -145,6 +191,7 @@ int main(void)
     test_hungry_on_low_battery();
     test_friend_message_happy();
     test_time_wraparound();
+    test_lock();
     if (failures) { printf("%d check(s) failed\n", failures); return 1; }
     printf("all tests passed\n");
     return 0;

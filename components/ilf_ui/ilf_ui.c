@@ -1,4 +1,4 @@
-#include "ilf_ui.h"
+#include "ilf_ui_priv.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -62,6 +62,7 @@ static struct {
     /* стадо */
     ilf_ui_herd_cb_t herd;
     lv_obj_t *pet_note;
+    lv_obj_t *sheep_lbl;
     lv_obj_t *targets[2];      /* «Кому» на голосовых и на рисунках */
     lv_obj_t *rec_btn, *rec_dot, *voice_lbl;
     lv_obj_t *rows[ILF_UI_VOICE_ROWS], *row_lbl[ILF_UI_VOICE_ROWS], *row_dot[ILF_UI_VOICE_ROWS];
@@ -215,6 +216,9 @@ static void build_pet(lv_obj_t *tile)
     lv_obj_set_width(ui.status, ILF_SCREEN_W);
     lv_obj_set_style_text_align(ui.status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(ui.status, 0, 340);
+
+    ui.sheep_lbl = label(ui.stage, &ilf_font_24, C_WOOL, "");
+    lv_obj_set_pos(ui.sheep_lbl, 28, 16);
 
     ui.pet_note = label(ui.stage, &ilf_font_24, C_SOFT, "");
     lv_obj_set_width(ui.pet_note, ILF_SCREEN_W);
@@ -531,6 +535,29 @@ static void build_draw(lv_obj_t *tile)
     lv_obj_add_event_cb(clr, clear_clicked, LV_EVENT_CLICKED, NULL);
 }
 
+void ilf_ui_set_sheep_name(const char *name)
+{
+    if (ui.sheep_lbl) lv_label_set_text(ui.sheep_lbl, name ? name : "");
+}
+
+/* замок: листать нельзя, смахнул барашка — панель PIN */
+static void gesture_event(lv_event_t *e)
+{
+    (void)e;
+    if (ilf_ui_locked()) ilf_ui_lock_show_pad();
+}
+
+void ilf_ui_set_locked(bool locked, ilf_ui_pin_cb cb, void *user)
+{
+    ilf_ui_lock_state(locked, cb, user);
+    if (locked) {
+        ilf_ui_show_app(ILF_APP_PET, false);
+        lv_obj_set_scroll_dir(ui.tileview, LV_DIR_NONE);
+    } else {
+        lv_obj_set_scroll_dir(ui.tileview, LV_DIR_HOR);
+    }
+}
+
 void ilf_ui_pet_note(const char *text)
 {
     if (!ui.pet_note) return;
@@ -640,6 +667,7 @@ void ilf_ui_init(void)
     lv_obj_set_style_bg_opa(ui.tileview, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(ui.tileview, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_event_cb(ui.tileview, tile_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(lv_screen_active(), gesture_event, LV_EVENT_GESTURE, NULL);
 
     for (int i = 0; i < ILF_APP_COUNT; i++) {
         lv_dir_t dir = LV_DIR_NONE;

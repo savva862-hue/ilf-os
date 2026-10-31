@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 #define ILF_HERD_MAX_FRIENDS     12
-#define ILF_HERD_NAME_LEN        20       /* UTF-8, с нулём на конце */
+#define ILF_HERD_NAME_LEN        24       /* UTF-8 с нулём: до 11 русских букв */
 #define ILF_HERD_MAX_FRAME      250       /* предел одного пакета ESP-NOW */
 #define ILF_HERD_CHUNK_DATA     229       /* = ILF_ADPCM_BLOCK_BYTES */
 #define ILF_HERD_MAX_MESSAGE    (ILF_HERD_CHUNK_DATA * 300)  /* ~17 секунд голоса */
@@ -104,6 +104,8 @@ typedef struct ilf_herd ilf_herd_t;
 /* Создать стадо. my_name — как этого барашка увидят друзья. */
 ilf_herd_t *ilf_herd_create(const ilf_herd_io_t *io, const uint8_t my_mac[6], const char *my_name);
 void ilf_herd_destroy(ilf_herd_t *h);
+/* Как этого барашка видят друзья (имя хозяина). Новое имя друзья узнают при следующем знакомстве. */
+void ilf_herd_set_name(ilf_herd_t *h, const char *name);
 
 /* Вернуть сохранённых друзей (при включении). Каждого регистрирует в радио. */
 void ilf_herd_load_friends(ilf_herd_t *h, const ilf_friend_t *friends, int count);

@@ -10,6 +10,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 #include <math.h>
@@ -26,6 +27,12 @@
 #include "ilf_ui.h"
 #include "ilf_net.h"
 #include "ilf_voice.h"
+#include "ilf_lock.h"
+#include "esp_random.h"
+#include "esp_spiffs.h"
+#include "esp_system.h"
+#include "mbedtls/sha256.h"
+#include "nvs.h"
 
 static const char *TAG = "ilf";
 
@@ -41,6 +48,55 @@ static const char *TAG = "ilf";
 static QueueHandle_t s_events;
 static ilf_soul_t s_soul;
 
+/* ---------------- хозяин и замок ---------------- */
+
+#define FACTORY_RESET_HOLD_MS 10000u
+
+typedef struct {
+    char owner[ILF_HERD_NAME_LEN];
+    char sheep[ILF_HERD_NAME_LEN];
+    ilf_pin_t pin;
+} profile_t;
+
+static profile_t s_profile;
+static bool s_has_profile;
+static ilf_lock_t s_lock;
+static volatile bool s_factory_reset;
+
+static void sha256(const uint8_t *d, size_t n, uint8_t out[32]) { mbedtls_sha256(d, n, out, 0); }
+
+static void profile_load(void)
+{
+    nvs_handle_t h;
+    size_t size = sizeof s_profile;
+    if (nvs_open("profile", NVS_READONLY, &h) == ESP_OK) {
+        s_has_profile = nvs_get_blob(h, "me", &s_profile, &size) == ESP_OK && size == sizeof s_profile;
+        nvs_close(h);
+    }
+    ilf_lock_init(&s_lock, s_has_profile ? &s_profile.pin : NULL);
+}
+
+static void profile_save(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("profile", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_blob(h, "me", &s_profile, sizeof s_profile);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void factory_reset(void)
+{
+    ESP_LOGW(TAG, "сброс к заводским: друзья, голосовые, хозяин");
+    nvs_handle_t h;
+    const char *spaces[] = { "profile", "herd" };
+    for (size_t i = 0; i < 2; i++) {
+        if (nvs_open(spaces[i], NVS_READWRITE, &h) == ESP_OK) { nvs_erase_all(h); nvs_commit(h); nvs_close(h); }
+    }
+    esp_spiffs_format("storage");
+    esp_restart();
+}
+
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 static void post(ilf_event_t ev) { xQueueSend(s_events, &ev, 0); }
@@ -54,6 +110,7 @@ static void sensors_task(void *arg)
     float prev_mag = 1.f;
     uint32_t last_shake = 0, last_tilt = 0, last_batt = 0;
     bool btn_prev = false;
+    uint32_t btn_down_at = 0;
     int16_t tilt_x_prev = 0, tilt_y_prev = 0;
 
     for (;;) {
@@ -81,7 +138,12 @@ static void sensors_task(void *arg)
         }
 
         bool btn = ilf_button_pressed();
-        if (btn && !btn_prev) post((ilf_event_t){ .type = ILF_EV_BUTTON, .button = 0 });
+        if (btn && !btn_prev) {
+            post((ilf_event_t){ .type = ILF_EV_BUTTON, .button = 0 });
+            btn_down_at = t;
+        }
+        /* забыл PIN: держать кнопку 10 секунд — сброс */
+        if (btn && t - btn_down_at > FACTORY_RESET_HOLD_MS) s_factory_reset = true;
         btn_prev = btn;
 
         if (t - last_batt > 10000 || last_batt == 0) {
@@ -248,6 +310,48 @@ static void herd_frame(uint32_t t)
     if (s_note_until && (int32_t)(t - s_note_until) > 0) pet_note(NULL, t);
 }
 
+/* замок и первый запуск (в потоке экрана) */
+static void on_pin(const char *pin, void *user)
+{
+    (void)user;
+    uint32_t t = now_ms();
+    char buf[64];
+    switch (ilf_lock_try(&s_lock, pin, t, sha256)) {
+    case ILF_LOCK_OK:
+        ilf_ui_set_locked(false, NULL, NULL);
+        pet_note(NULL, t);
+        break;
+    case ILF_LOCK_WRONG: {
+        int left = ILF_LOCK_TRIES - s_lock.fails;
+        snprintf(buf, sizeof buf, "Неверно, ещё %d %s", left, left == 1 ? "попытка" : "попытки");
+        ilf_ui_lock_message(buf);
+        break;
+    }
+    case ILF_LOCK_WAIT:
+        snprintf(buf, sizeof buf, "Подожди %lu с", (unsigned long)(ilf_lock_wait_left(&s_lock, t) / 1000 + 1));
+        ilf_ui_lock_message(buf);
+        break;
+    }
+}
+
+static void on_setup(const ilf_setup_result_t *r, void *user)
+{
+    (void)user;
+    memset(&s_profile, 0, sizeof s_profile);
+    snprintf(s_profile.owner, sizeof s_profile.owner, "%s", r->owner);
+    snprintf(s_profile.sheep, sizeof s_profile.sheep, "%s", r->sheep);
+    uint8_t salt[16];
+    esp_fill_random(salt, sizeof salt);
+    ilf_lock_make_pin(&s_profile.pin, r->pin, salt, sha256);
+    profile_save();
+    s_has_profile = true;
+    ilf_lock_init(&s_lock, &s_profile.pin);
+    ilf_lock_try(&s_lock, r->pin, now_ms(), sha256);   /* только что задал — открыт */
+    ilf_herd_set_name(s_herd, s_profile.owner);
+    ilf_ui_set_sheep_name(s_profile.sheep);
+    ESP_LOGI(TAG, "хозяин %s, барашек %s", s_profile.owner, s_profile.sheep);
+}
+
 /* ---------------- экран и душа ---------------- */
 
 static void on_pet_touch(int16_t x, int16_t y, void *user)
@@ -273,6 +377,15 @@ static void ui_task(void *arg)
     refresh_target();
     refresh_voice_list();
 
+    profile_load();
+    if (s_has_profile) {
+        ilf_herd_set_name(s_herd, s_profile.owner);
+        ilf_ui_set_sheep_name(s_profile.sheep);
+        ilf_ui_set_locked(true, on_pin, NULL);
+    } else {
+        ilf_ui_setup_start(on_setup, NULL);
+    }
+
     uint32_t last_clock = 0, last_activity = now_ms();
     bool screen_off = false, dimmed = false;
 
@@ -284,7 +397,7 @@ static void ui_task(void *arg)
         while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
             ilf_soul_handle(&s_soul, &ev, t);
             /* удар о другого барашка — знакомство; без второго удара ничего не случится */
-            if (ev.type == ILF_EV_SHAKE) ilf_herd_bump(s_herd, t);
+            if (ev.type == ILF_EV_SHAKE && !ilf_ui_locked() && s_has_profile) ilf_herd_bump(s_herd, t);
             if (ev.type == ILF_EV_BATTERY) ilf_ui_update_battery(ev.battery.percent, ev.battery.charging);
             if (ev.type == ILF_EV_SHAKE || ev.type == ILF_EV_BUTTON || ev.type == ILF_EV_FRIEND_MESSAGE) woke = true;
         }
@@ -297,11 +410,25 @@ static void ui_task(void *arg)
                     ilf_soul_handle(&s_soul, &(ilf_event_t){ .type = ILF_EV_BUTTON }, t);
                 }
                 if (screen_off) lv_obj_invalidate(lv_screen_active());
+                if (screen_off) {
+                    ilf_lock_screen_on(&s_lock, t);
+                    if (ilf_lock_is_locked(&s_lock, t) && !ilf_ui_locked()) {
+                        ilf_ui_set_locked(true, on_pin, NULL);
+                    }
+                    if (ilf_ui_locked()) pet_note("Смахни, чтобы открыть", t);
+                }
                 screen_off = dimmed = false;
                 ilf_display_set_brightness(BRIGHT_LEVEL);
             }
         }
 
+        if (s_factory_reset) {
+            ilf_display_set_brightness(BRIGHT_LEVEL);
+            pet_note("Сбрасываю барашка…", t);
+            lv_timer_handler();
+            vTaskDelay(pdMS_TO_TICKS(500));
+            factory_reset();
+        }
         herd_frame(t);
         ilf_soul_update(&s_soul, t);
 
@@ -309,6 +436,9 @@ static void ui_task(void *arg)
         uint32_t idle = t - last_activity;
         if (!screen_off && idle > SCREEN_OFF_IDLE_MS) {
             screen_off = true;
+            ilf_lock_screen_off(&s_lock, t);
+            /* экран погас посреди ввода PIN — убрать панель */
+            ilf_ui_lock_hide();
             ilf_display_set_brightness(0);
         } else if (!screen_off && !dimmed && idle > SCREEN_DIM_IDLE_MS) {
             dimmed = true;
