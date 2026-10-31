@@ -559,14 +559,6 @@ void ilf_ble_music(ilf_ams_cmd_t cmd)
     ble_gattc_write_flat(b.conn, b.chr[C_AMS_RC].val, &c, 1, NULL, NULL);
 }
 
-void ilf_ble_call(uint32_t uid, bool accept)
-{
-    if (!b.encrypted || !b.chr[C_ANCS_CP].val) return;
-    uint8_t cmd[8];
-    size_t n = ilf_ancs_action(uid, accept, cmd);
-    ble_gattc_write_flat(b.conn, b.chr[C_ANCS_CP].val, cmd, (uint16_t)n, NULL, NULL);
-}
-
 void ilf_ble_forget(void)
 {
     if (b.connected) ble_gap_terminate(b.conn, BLE_ERR_REM_USER_CONN_TERM);

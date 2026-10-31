@@ -7,10 +7,10 @@ ROOT=../..
 OUT=out; mkdir -p $OUT/obj
 CFLAGS="--target=wasm32 -O2 -ffreestanding -nostdlib -fno-builtin -Wno-everything -std=gnu11
   -Ilibc -I. -I$ROOT/components/lvgl -I$ROOT/components
-  -I$ROOT/components/ilf_soul/include -I$ROOT/components/ilf_ui/include -I$ROOT/components/ilf_ui
+  -I$ROOT/components/ilf_soul/include -I$ROOT/components/ilf_games/include -I$ROOT/components/ilf_ui/include -I$ROOT/components/ilf_ui
   -I$ROOT/components/ilf_herd/include -DLV_CONF_INCLUDE_SIMPLE -DLV_LVGL_H_INCLUDE_SIMPLE"
 SRCS=$(find $ROOT/components/lvgl/src -name '*.c'; \
-  echo $ROOT/components/ilf_soul/ilf_soul.c $ROOT/components/ilf_soul/ilf_clock.c; \
+  echo $ROOT/components/ilf_games/ilf_games.c $ROOT/components/ilf_soul/ilf_soul.c $ROOT/components/ilf_soul/ilf_clock.c; \
   ls $ROOT/components/ilf_ui/*.c $ROOT/components/ilf_ui/fonts/*.c; echo web_main.c libc/libc.c)
 OBJS=()
 TODO=()

@@ -111,6 +111,19 @@ static void test_hungry_on_low_battery(void)
     ev.battery.charging = true;
     ilf_soul_handle(&s, &ev, now + 10);
     CHECK(ilf_soul_face(&s)->emotion == ILF_EMO_CALM);
+    CHECK(ilf_soul_face(&s)->eating);
+    /* жуёт: челюсть ходит туда-сюда */
+    float lo = 1.f, hi = 0.f;
+    for (int i = 0; i < 40; i++) {
+        ilf_soul_update(&s, now + 20 + (uint32_t)i * 20);
+        float c = ilf_soul_face(&s)->chew;
+        if (c < lo) lo = c;
+        if (c > hi) hi = c;
+    }
+    CHECK(lo < 0.2f && hi > 0.8f);
+    /* уснул — не жуёт */
+    run_until(&s, &now, ILF_SOUL_ASLEEP_AFTER_MS + 100);
+    CHECK(!ilf_soul_face(&s)->eating);
 }
 
 static void test_friend_message_happy(void)

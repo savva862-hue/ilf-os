@@ -60,6 +60,11 @@ extern "C" {
 #define ILF_I2S_DIN         GPIO_NUM_10
 #define ILF_PA_EN           GPIO_NUM_46   /* усилитель динамика — сверить на плате */
 
+/* карта microSD, SDMMC 1 бит — сверить на плате */
+#define ILF_SD_CLK          GPIO_NUM_2
+#define ILF_SD_CMD          GPIO_NUM_1
+#define ILF_SD_D0           GPIO_NUM_3
+
 /* биты расширителя TCA9554 */
 #define ILF_EXIO_LCD_RST    (1u << 0)
 #define ILF_EXIO_LCD_PWR    (1u << 1)
@@ -119,6 +124,12 @@ void   ilf_audio_end(void);     /* выключить — процессор с�
 void   ilf_audio_speaker(bool on);
 size_t ilf_audio_read(int16_t *pcm, size_t samples, uint32_t timeout_ms);
 size_t ilf_audio_write(const int16_t *pcm, size_t samples, uint32_t timeout_ms);
+/* Громкость динамика 0..100 (0 — тишина). Можно звать когда угодно. */
+void   ilf_audio_set_volume(uint8_t percent);
+
+/* --- карта microSD --- */
+esp_err_t ilf_sd_mount(const char *base);
+bool ilf_sd_ok(void);
 
 /* --- кнопка BOOT --- */
 esp_err_t ilf_button_init(void);

@@ -3,6 +3,8 @@ set(ILF_UI_SRCS
     ilf_eye_img.c
     ilf_ui_setup.c
     ilf_ui_phone.c
+    ilf_ui_games.c
+    ilf_ui_settings.c
     ilf_head_img.c
     fonts/ilf_font_24.c
     fonts/ilf_font_32.c
@@ -12,9 +14,9 @@ set(ILF_UI_SRCS
 if(ESP_PLATFORM)
     idf_component_register(SRCS ${ILF_UI_SRCS}
                            INCLUDE_DIRS "include"
-                           REQUIRES lvgl ilf_soul ilf_herd)
+                           REQUIRES lvgl ilf_soul ilf_herd ilf_games)
 else()
     add_library(ilf_ui STATIC ${ILF_UI_SRCS})
     target_include_directories(ilf_ui PUBLIC include)
-    target_link_libraries(ilf_ui PUBLIC lvgl ilf_soul ilf_herd)
+    target_link_libraries(ilf_ui PUBLIC lvgl ilf_soul ilf_herd ilf_games)
 endif()

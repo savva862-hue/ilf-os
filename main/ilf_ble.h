@@ -7,7 +7,7 @@
  * вытесняет старый.
  *
  * С телефона берём: время и часовой пояс (CTS), что играет + пульт (AMS),
- * уведомления и звонки (ANCS). Всё приходит событиями через ilf_ble_poll()
+ * уведомления (ANCS; звонки пропускаем). Всё приходит событиями через ilf_ble_poll()
  * в поток экрана.
  */
 #pragma once
@@ -56,7 +56,5 @@ bool ilf_ble_connected(void);
 
 /* Пульт музыки. */
 void ilf_ble_music(ilf_ams_cmd_t cmd);
-/* Звонок: принять (true) или отклонить (false). */
-void ilf_ble_call(uint32_t uid, bool accept);
 /* Забыть iPhone (сброс к заводским). */
 void ilf_ble_forget(void);

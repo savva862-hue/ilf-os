@@ -57,7 +57,9 @@ typedef struct {
     int idx;
     uint8_t mac[6];
     ilf_herd_t *h;
-    int friends_added, timeouts, messages, strokes, sent_ok, sent_fail;
+    int friends_added, timeouts, messages, strokes, sent_ok, sent_fail, lives;
+    uint16_t last_live_seq;
+    size_t last_live_len;
     uint8_t last_msg[ILF_HERD_MAX_MESSAGE];
     size_t last_len;
     ilf_stroke_t last_stroke;
@@ -97,6 +99,7 @@ static void t_event(void *ctx, const ilf_herd_event_t *ev)
     case ILF_HERD_EV_MESSAGE: n->messages++; memcpy(n->last_msg, ev->data, ev->len); n->last_len = ev->len; break;
     case ILF_HERD_EV_STROKE: n->strokes++; n->last_stroke = *ev->stroke; break;
     case ILF_HERD_EV_SENT: if (ev->ok) n->sent_ok++; else n->sent_fail++; break;
+    case ILF_HERD_EV_LIVE: n->lives++; n->last_live_seq = ev->msg_id; n->last_live_len = ev->len; break;
     default: break;
     }
 }
@@ -267,6 +270,31 @@ static void test_stroke(void)
     CHECK(nodes[1].last_stroke.pts[2].x == 367 && nodes[1].last_stroke.pts[2].y == 447);
 }
 
+static void test_live_and_long_voice(void)
+{
+    reset(2);
+    pair_ab();
+    /* рация: блоки уходят сразу и по порядку */
+    uint8_t blk[ILF_HERD_CHUNK_DATA];
+    for (uint16_t i = 0; i < 20; i++) {
+        memset(blk, i, sizeof blk);
+        CHECK(ilf_herd_send_live(nodes[0].h, ILF_HERD_ALL, i, blk, sizeof blk, now));
+        run(60);
+    }
+    CHECK(nodes[1].lives == 20 && nodes[1].last_live_seq == 19 && nodes[1].last_live_len == sizeof blk);
+    /* «я в эфире» без звука */
+    ilf_herd_send_live(nodes[0].h, 0, 99, NULL, 0, now);
+    run(30);
+    CHECK(nodes[1].lives == 21 && nodes[1].last_live_len == 0);
+    /* голосовое на минуту доходит целиком */
+    static uint8_t big[ILF_HERD_MAX_MESSAGE];
+    for (size_t i = 0; i < sizeof big; i++) big[i] = (uint8_t)(i * 7);
+    loss_percent = 5;
+    CHECK(ilf_herd_send(nodes[0].h, 0, ILF_MSG_VOICE, big, sizeof big, now) != 0);
+    run(60000);
+    CHECK(nodes[1].messages == 1 && nodes[1].last_len == sizeof big && !memcmp(nodes[1].last_msg, big, sizeof big));
+}
+
 static void test_stranger_ignored(void)
 {
     reset(3);
@@ -337,6 +365,7 @@ int main(void)
     test_out_of_range_fails();
     test_wakes_sleeping_friend();
     test_stroke();
+    test_live_and_long_voice();
     test_stranger_ignored();
     test_forget_and_reload();
     test_long_russian_name_cut_safely();

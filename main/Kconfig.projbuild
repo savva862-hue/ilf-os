@@ -1,0 +1,15 @@
+menu "ILF OS"
+
+config ILF_YANDEX_CLIENT_ID
+    string "Яндекс OAuth: ClientID приложения"
+    default ""
+    help
+        Приложение регистрируется на oauth.yandex.ru с правами
+        «Доступ к папке приложения на Диске» (cloud_api:disk.app_folder).
+        Пусто — выгрузка на Диск выключена.
+
+config ILF_YANDEX_CLIENT_SECRET
+    string "Яндекс OAuth: Client secret"
+    default ""
+
+endmenu

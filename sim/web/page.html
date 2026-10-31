@@ -69,7 +69,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   <div class="side">
     <div>
       <h1>Тестер барашка ILF</h1>
-      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны и первый запуск. Радио, звук, iPhone и второй барашек тут понарошку, их заменяют кнопки ниже.</p>
+      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны и первый запуск. Радио, звук, iPhone и второй барашек тут понарошку, их заменяют кнопки ниже. В лабиринте наклон — стрелки на клавиатуре или палец на поле.</p>
     </div>
 
     <ul class="tips">
@@ -93,6 +93,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
         <button class="act" id="fvoice">Прислать голосовое</button>
         <button class="act" id="fdraw">Прислать рисунок</button>
         <button class="act" id="fupd">Поделиться обновлением</button>
+        <button class="act" id="flive">Сказать в рацию</button>
       </div>
     </div>
     <div class="group">
@@ -100,8 +101,6 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
       <div class="btns">
         <button class="act" id="phone">Подключить / отключить</button>
         <button class="act" id="pnote">Уведомление</button>
-        <button class="act" id="pcall">Звонок</button>
-        <button class="act" id="pend">Положить трубку</button>
       </div>
     </div>
     <div class="group">
@@ -109,6 +108,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
       <div class="btns">
         <button class="act" id="low">Батарея 12%</button>
         <button class="act" id="ok">Батарея 83%</button>
+        <button class="act" id="charge">Зарядка вкл/выкл</button>
         <button class="act" id="off">Погасить экран</button>
         <button class="act" id="restart">Начать заново</button>
       </div>
@@ -120,7 +120,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
 <script>
 (async () => {
   const W = 368, H = 448;
-  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8, phone: 10, pnote: 11, pcall: 12, pend: 13, fupd: 14 };
+  const EV = { shake: 1, bump: 2, fvoice: 3, fdraw: 4, low: 5, ok: 6, off: 7, on: 8, phone: 10, pnote: 11, fupd: 14, charge: 15, flive: 16 };
   const toast = document.getElementById('toast');
   const canvas = document.getElementById('screen');
   const ctx = canvas.getContext('2d');
@@ -211,8 +211,14 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   on('fupd', () => { wake(); e.ilf_web_event(EV.fupd); });
   on('phone', () => { wake(); e.ilf_web_event(EV.phone); });
   on('pnote', () => { wake(); e.ilf_web_event(EV.pnote); });
-  on('pcall', () => { wake(); e.ilf_web_event(EV.pcall); });
-  on('pend', () => { e.ilf_web_event(EV.pend); });
+  on('flive', () => { wake(); e.ilf_web_event(EV.flive); say('Мира говорит в рацию — звук в тестере понарошку'); });
+  on('charge', () => { wake(); e.ilf_web_event(EV.charge); });
+  /* лабиринт: стрелки наклоняют барашка (или веди шарик пальцем) */
+  const keys = {};
+  const tilt = () => e.ilf_web_tilt(((keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0)) * 700,
+                                     ((keys.ArrowDown ? 1 : 0) - (keys.ArrowUp ? 1 : 0)) * 700);
+  addEventListener('keydown', ev => { if (ev.key.startsWith('Arrow')) { keys[ev.key] = true; tilt(); ev.preventDefault(); } });
+  addEventListener('keyup', ev => { if (ev.key.startsWith('Arrow')) { keys[ev.key] = false; tilt(); } });
   on('low', () => { wake(); e.ilf_web_event(EV.low); });
   on('ok', () => { wake(); e.ilf_web_event(EV.ok); });
   on('off', () => { off = true; e.ilf_web_event(EV.off); draw(); say('Экран погас. Нажми на экран или на кнопку сбоку, чтобы разбудить.'); });

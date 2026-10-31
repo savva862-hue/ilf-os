@@ -28,7 +28,7 @@ extern "C" {
 #define ILF_HERD_NAME_LEN        24       /* UTF-8 с нулём: до 11 русских букв */
 #define ILF_HERD_MAX_FRAME      250       /* предел одного пакета ESP-NOW */
 #define ILF_HERD_CHUNK_DATA     229       /* = ILF_ADPCM_BLOCK_BYTES */
-#define ILF_HERD_MAX_MESSAGE    (ILF_HERD_CHUNK_DATA * 300)  /* ~17 секунд голоса */
+#define ILF_HERD_MAX_MESSAGE    (ILF_HERD_CHUNK_DATA * 1065) /* ~60 секунд голоса (~240 КБ) */
 #define ILF_HERD_STROKE_POINTS   40       /* точек в одном пакете рисунка */
 #define ILF_HERD_ALL            (-1)      /* адресат «всё стадо» */
 
@@ -71,6 +71,7 @@ typedef enum {
     ILF_HERD_EV_STROKE,         /* friend_idx, stroke: кусок рисунка */
     ILF_HERD_EV_SENT,           /* friend_idx, msg_id, ok: доставка одному другу закончилась */
     ILF_HERD_EV_SAVE,           /* список друзей поменялся — сохранить (ilf_herd_friends) */
+    ILF_HERD_EV_LIVE,           /* friend_idx, msg_id = номер блока, data/len: рация; len 0 — «я в эфире» */
 } ilf_herd_ev_type_t;
 
 typedef struct {
@@ -128,6 +129,10 @@ float ilf_herd_send_progress(const ilf_herd_t *h);
 
 /* Кусок рисунка — без повторов, теряться не страшно. */
 void ilf_herd_send_stroke(ilf_herd_t *h, int friend_idx, const ilf_stroke_t *s, uint32_t now_ms);
+
+/* Рация: один блок голоса сразу в эфир, без повторов (опоздавший блок не нужен).
+   len == 0 — «я в эфире», чтобы радио друга не дремало. false — очередь полна, блок пропущен. */
+bool ilf_herd_send_live(ilf_herd_t *h, int friend_idx, uint16_t seq, const uint8_t *data, size_t len, uint32_t now_ms);
 
 /* От радио: пришёл пакет / закончилась отправка. */
 void ilf_herd_on_recv(ilf_herd_t *h, const uint8_t mac[6], const uint8_t *data, size_t len, uint32_t now_ms);

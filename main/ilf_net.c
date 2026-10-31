@@ -9,6 +9,7 @@
 #include "esp_partition.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
 #include "esp_now.h"
 #include "esp_random.h"
 #include "esp_wifi.h"
@@ -306,7 +307,9 @@ ilf_herd_t *ilf_net_init(ilf_net_event_fn fn, void *user)
     s_user = user;
     s_q = xQueueCreate(40, sizeof(net_msg_t));
 
+    esp_netif_init();
     esp_event_loop_create_default();
+    esp_netif_create_default_wifi_sta();   /* для домашнего Wi-Fi (ilf_cloud) */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     esp_wifi_set_storage(WIFI_STORAGE_RAM);

@@ -183,6 +183,10 @@ int main(int argc, char **argv)
     ilf_ui_update_battery(12, false);
     step(300);
     shot("08_hungry");
+    send((ilf_event_t){ .type = ILF_EV_BATTERY, .battery = { 12, true } });
+    ilf_ui_update_battery(12, true);
+    step(470);
+    shot("08b_eating");
     send((ilf_event_t){ .type = ILF_EV_BATTERY, .battery = { 83, false } });
     ilf_ui_update_battery(83, false);
     step(300);
@@ -237,13 +241,32 @@ int main(int argc, char **argv)
     ilf_ui_phone(true, "Ilf");
     ilf_ui_music("Группа крови", "Кино", true); step(100); shot("18_phone_music");
     ilf_ui_show_app(ILF_APP_PET, false);
-    ilf_ui_notify("Telegram", "Мама", "Ты поел? Не забудь шапку, на улице холодно", false, 1);
+    ilf_ui_notify("Telegram", "Мама", "Ты поел? Не забудь шапку, на улице холодно", 1);
     step(300); settle(); shot("19_phone_note");
     step(7000);
-    ilf_ui_notify("Телефон", "Мама", NULL, true, 2); step(300); shot("20_phone_call");
-    ilf_ui_notify_gone(2); step(100);
-    ilf_ui_ask("Обновление", "ILF OS v4", "Мира делится новой версией. Обновить?", NULL, NULL);
+    ilf_ui_ask("Обновление", "ILF OS v5", "Мира делится новой версией. Обновить?", NULL, NULL);
     step(300); shot("21_update_offer");
     ilf_ui_show_app(ILF_APP_CLOCK, false); step(100); shot("16_app_clock");
+    step(46000);   /* карточка обновления уходит сама */
+
+    /* v0.4: игры и настройки */
+    ilf_ui_show_app(ILF_APP_GAMES, false); step(100); shot("22_app_games");
+    ilf_ui_game_open(0);
+    ilf_ui_tilt(0.6f, 0.4f);
+    step(700); shot("23_maze");
+    ilf_ui_game_close();
+    ilf_ui_game_open(1);
+    step(100);
+    ilf_ui_shake();
+    step(1500); shot("24_8ball");
+    ilf_ui_game_close();
+    ilf_ui_show_app(ILF_APP_SETTINGS, false);
+    ilf_ui_wifi_status("Home · ок");
+    ilf_ui_disk_status("привязан · всё выгружено");
+    ilf_ui_set_version(4);
+    step(100); shot("25_settings");
+    ilf_ui_disk_code("ya.ru/device", "4821 3307");
+    step(100); shot("26_disk_code");
+    ilf_ui_disk_code(NULL, NULL);
     return 0;
 }

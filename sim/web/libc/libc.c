@@ -95,3 +95,7 @@ float atan2f(float y, float x)
     if (x < 0) r = 3.1415926f - r;
     return y < 0 ? -r : r;
 }
+#undef fminf
+#undef fmaxf
+float fminf(float a, float b) { return a < b ? a : b; }
+float fmaxf(float a, float b) { return a > b ? a : b; }

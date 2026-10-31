@@ -3,7 +3,7 @@
  * поэтому тот же код рисует и на плате, и в симуляторе на ПК.
  *
  * Приложения листаются свайпом влево-вправо:
- *   Питомец · Голосовые · Рисунки · Музыка · Часы
+ *   Питомец · Голосовые · Рисунки · Музыка · Игры · Часы · Настройки
  */
 #pragma once
 
@@ -23,7 +23,9 @@ typedef enum {
     ILF_APP_VOICE,
     ILF_APP_DRAW,
     ILF_APP_MUSIC,
+    ILF_APP_GAMES,
     ILF_APP_CLOCK,
+    ILF_APP_SETTINGS,
     ILF_APP_COUNT
 } ilf_app_t;
 
@@ -56,6 +58,9 @@ typedef enum {
     ILF_VOICE_SENT,
     ILF_VOICE_FAILED,
     ILF_VOICE_PLAYING,
+    ILF_VOICE_LIVE_READY,   /* рация включена, никто не говорит */
+    ILF_VOICE_LIVE_TALK,    /* говорим в эфир; value = секунды */
+    ILF_VOICE_LIVE_HEAR,    /* слышим друга; имя — ilf_ui_live_from() */
 } ilf_voice_state_t;
 
 typedef struct {
@@ -72,6 +77,9 @@ typedef struct {
     void (*play)(int item, void *user);              /* тап по голосовому из списка */
     void (*stroke)(const ilf_stroke_t *s, void *user); /* кусок своего рисунка */
     void (*clear)(void *user);                       /* очистили холст */
+    void (*live)(bool on, void *user);               /* включили / выключили рацию */
+    /* холст перед очисткой (RGB565, w×h): сохранить рисунок, если он не пустой */
+    void (*save_drawing)(const uint16_t *pixels, int w, int h, void *user);
     void *user;
 } ilf_ui_herd_cb_t;
 
@@ -79,6 +87,9 @@ void ilf_ui_set_herd_cb(const ilf_ui_herd_cb_t *cb);
 /* Кому уходят голосовые и рисунки: «Всё стадо» или имя друга. */
 void ilf_ui_set_target(const char *name);
 void ilf_ui_voice_state(ilf_voice_state_t st, float value);
+/* Кого сейчас слышно по рации. */
+void ilf_ui_live_from(const char *name);
+bool ilf_ui_live_on(void);
 /* Последние голосовые, новые первыми (до ILF_UI_VOICE_ROWS). */
 void ilf_ui_voice_list(const ilf_ui_voice_item_t *items, int count);
 /* Рисунок друга и очистка холста. */
@@ -98,11 +109,11 @@ void ilf_ui_setup_start(ilf_ui_setup_cb done, void *user);
 bool ilf_ui_setup_active(void);
 /* ---------- iPhone: музыка, уведомления, код подключения ---------- */
 
-typedef enum { ILF_UI_MUSIC_PREV = 0, ILF_UI_MUSIC_TOGGLE, ILF_UI_MUSIC_NEXT } ilf_ui_music_btn_t;
+typedef enum { ILF_UI_MUSIC_PREV = 0, ILF_UI_MUSIC_TOGGLE, ILF_UI_MUSIC_NEXT,
+               ILF_UI_MUSIC_VOL_DOWN, ILF_UI_MUSIC_VOL_UP } ilf_ui_music_btn_t;
 
 typedef struct {
     void (*music)(ilf_ui_music_btn_t btn, void *user);       /* кнопка пульта */
-    void (*call)(uint32_t uid, bool accept, void *user);      /* принять / отклонить звонок */
     void *user;
 } ilf_ui_phone_cb_t;
 
@@ -113,15 +124,48 @@ void ilf_ui_phone(bool connected, const char *ble_name);
 void ilf_ui_music(const char *title, const char *artist, bool playing);
 /* Код для iPhone на весь экран; code < 0 — убрать. */
 void ilf_ui_passkey(int32_t code);
-/* Уведомление сверху. call — входящий звонок
-   с кнопками «принять/отклонить», висит, пока телефон его не уберёт. */
-void ilf_ui_notify(const char *app, const char *title, const char *text, bool call, uint32_t uid);
+/* Уведомление сверху, само уходит через 6 с. */
+void ilf_ui_notify(const char *app, const char *title, const char *text, uint32_t uid);
 void ilf_ui_notify_gone(uint32_t uid);
 
 /* Вопрос карточкой сверху с кнопками «нет» и «да». answer: 1 — да, 0 — нет,
    -1 — не ответили (карточка ушла сама через 45 с). */
 typedef void (*ilf_ui_ask_cb)(int answer, void *user);
 void ilf_ui_ask(const char *head, const char *title, const char *text, ilf_ui_ask_cb cb, void *user);
+
+/* ---------- игры ---------- */
+
+/* Наклон с датчика в долях g: x — вправо, y — к себе (вниз по экрану). Звать каждый кадр. */
+void ilf_ui_tilt(float ax, float ay);
+/* Встряхнули барашка — шар предсказаний отвечает. */
+void ilf_ui_shake(void);
+/* Открыта игра — экран не гасим. */
+bool ilf_ui_game_active(void);
+void ilf_ui_game_close(void);
+/* 0 — лабиринт, 1 — шар (для симулятора) */
+void ilf_ui_game_open(int which);
+
+/* ---------- настройки ---------- */
+
+typedef struct {
+    void (*volume)(int percent, void *user);                         /* громкость динамика */
+    void (*wifi_scan)(void *user);                                   /* открыли список сетей */
+    void (*wifi_join)(const char *ssid, const char *pass, void *user);
+    void (*wifi_forget)(void *user);
+    void (*disk_link)(void *user);                                   /* тап по «Яндекс Диск» */
+    void *user;
+} ilf_ui_settings_cb_t;
+
+void ilf_ui_set_settings_cb(const ilf_ui_settings_cb_t *cb);
+void ilf_ui_settings_volume(int percent);
+void ilf_ui_wifi_list(const char *const *ssids, int n);
+/* Строка под «Wi-Fi»: «Home · ок», «не задан». */
+void ilf_ui_wifi_status(const char *text);
+/* Строка под «Яндекс Диск»: «привязан · 3 файла ждут», «не привязан». */
+void ilf_ui_disk_status(const char *text);
+/* Код для привязки Диска на весь экран; url == NULL — убрать. */
+void ilf_ui_disk_code(const char *url, const char *code);
+void ilf_ui_set_version(int version);
 
 /* Имя барашка в углу экрана питомца */
 void ilf_ui_set_sheep_name(const char *name);

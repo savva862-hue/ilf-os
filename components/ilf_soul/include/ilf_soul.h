@@ -53,6 +53,8 @@ typedef struct {
     float eyelid;     /* 0 = глаза открыты, 1 = закрыты */
     float mouth;      /* -1 = грустный рот, 0 = ровный, 1 = улыбка */
     bool  mouth_open; /* «о» от испуга */
+    bool  eating;     /* на зарядке: жуёт клевер */
+    float chew;       /* 0..1 — насколько открыта челюсть, когда жуёт */
 } ilf_face_t;
 
 /* Тайминги в миллисекундах. Вынесены наружу, чтобы их было легко подкручивать. */
@@ -69,6 +71,7 @@ typedef struct {
 #define ILF_SOUL_SHAKES_TO_SAD          3u
 #define ILF_SOUL_SHAKE_WINDOW_MS    10000u
 #define ILF_SOUL_HUNGRY_PERCENT        15u
+#define ILF_SOUL_CHEW_MS              640u
 
 typedef struct {
     /* состояние, руками не трогать */

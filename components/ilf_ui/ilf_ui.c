@@ -22,6 +22,8 @@ LV_IMAGE_DECLARE(ilf_eye_small);
 #define C_MUTED    0x8F879B
 #define C_SOFT     0xE4DED4   /* подписи: макет v2 весь бело-кремовый */
 #define C_TRACK    0x3A3836
+#define C_CLOVER   0x7BC47F
+#define C_STEM     0x4E8F55
 
 /* Голова — картинка из макета assets/ui/ilf_ui_mockup_v2.png (tools/gen_head.py),
    глаза, веки и рты рисуются поверх неё кодом, чтобы барашек оставался живым */
@@ -50,6 +52,9 @@ static struct {
     lv_obj_t *tear;
     lv_obj_t *sweat;
     lv_obj_t *status;
+    lv_obj_t *chew;      /* жующий рот */
+    lv_obj_t *clover;    /* клевер на зарядке */
+    bool last_eating;
     ilf_ui_touch_cb_t touch_cb;
     void *touch_user;
     /* часы */
@@ -64,7 +69,10 @@ static struct {
     lv_obj_t *pet_note;
     lv_obj_t *sheep_lbl;
     lv_obj_t *targets[2];      /* «Кому» на голосовых и на рисунках */
-    lv_obj_t *rec_btn, *rec_dot, *voice_lbl;
+    lv_obj_t *rec_btn, *rec_dot, *voice_lbl, *live_btn;
+    bool live;
+    char live_from[ILF_HERD_NAME_LEN];
+    bool drawn;          /* на холсте что-то есть */
     lv_obj_t *rows[ILF_UI_VOICE_ROWS], *row_lbl[ILF_UI_VOICE_ROWS], *row_dot[ILF_UI_VOICE_ROWS];
     lv_obj_t *canvas;
     lv_point_t last_pt;
@@ -192,6 +200,23 @@ static void build_pet(lv_obj_t *tile)
     ui.frown = arc_line(ui.stage, HEAD_CX, NOSE_Y + 16, 18, 210, 330, C_MOUTH, 3);
     ui.mouth_o = blob(ui.stage, HEAD_CX, NOSE_Y + 10, 9, 12, C_PUPIL);
 
+    ui.chew = blob(ui.stage, HEAD_CX, NOSE_Y + 9, 16, 6, C_PUPIL);
+
+    /* клевер: стебелёк торчит изо рта вбок, на конце три листочка */
+    ui.clover = plain(ui.stage);
+    lv_obj_set_size(ui.clover, 80, 60);
+    lv_obj_t *stem = plain(ui.clover);
+    lv_obj_set_size(stem, 40, 5);
+    lv_obj_set_pos(stem, 0, 28);
+    lv_obj_set_style_radius(stem, 3, 0);
+    lv_obj_set_style_bg_color(stem, lv_color_hex(C_STEM), 0);
+    lv_obj_set_style_bg_opa(stem, LV_OPA_COVER, 0);
+    static const int8_t leaf[3][2] = { { 54, 16 }, { 66, 34 }, { 48, 40 } };
+    for (int i = 0; i < 3; i++) blob(ui.clover, leaf[i][0], leaf[i][1], 24, 22, C_CLOVER);
+    blob(ui.clover, 55, 30, 10, 10, C_STEM);
+    show(ui.chew, false);
+    show(ui.clover, false);
+
     ui.tear = blob(ui.stage, EYE_L_CX - 10, EYE_CY + EYE_H / 2 + 6, 9, 14, C_PUPIL);
     ui.sweat = blob(ui.stage, 262, 140, 9, 14, C_PUPIL);
     ui.zzz = label(ui.stage, &ilf_font_32, C_WOOL, "z z Z");
@@ -249,11 +274,22 @@ void ilf_ui_update_face(const ilf_face_t *f)
         lv_obj_set_pos(e->closed, e->cx - 20 + dx, EYE_CY - 26 + dy);
     }
 
-    show(ui.smile, !f->mouth_open && f->mouth > 0.5f);
-    show(ui.frown, !f->mouth_open && f->mouth < -0.5f);
-    show(ui.mouth_o, f->mouth_open);
+    show(ui.smile, !f->eating && !f->mouth_open && f->mouth > 0.5f);
+    show(ui.frown, !f->eating && !f->mouth_open && f->mouth < -0.5f);
+    show(ui.mouth_o, !f->eating && f->mouth_open);
+    show(ui.chew, f->eating);
+    show(ui.clover, f->eating);
+    if (f->eating) {
+        /* жуёт: рот открывается и закрывается, клевер подпрыгивает вместе с челюстью */
+        int jaw = (int)(f->chew * 7.0f + 0.5f);
+        lv_obj_set_size(ui.chew, 16, 4 + jaw);
+        lv_obj_set_pos(ui.chew, HEAD_CX - 8, NOSE_Y + 7);
+        lv_obj_set_pos(ui.clover, HEAD_CX + 2, NOSE_Y + 9 + jaw / 2 - 30);
+    }
+    bool status_changed = f->eating != ui.last_eating;
+    ui.last_eating = f->eating;
 
-    if (f->emotion != ui.last_emotion) {
+    if (f->emotion != ui.last_emotion || status_changed) {
         ui.last_emotion = f->emotion;
         show(ui.zzz, f->emotion == ILF_EMO_ASLEEP || f->emotion == ILF_EMO_SLEEPY);
         show(ui.tear, f->emotion == ILF_EMO_SAD);
@@ -264,6 +300,7 @@ void ilf_ui_update_face(const ilf_face_t *f)
         case ILF_EMO_SAD:    txt = "Не тряси меня так"; break;
         default: break;
         }
+        if (f->eating) txt = "Ням-ням, заряжаюсь";
         lv_label_set_text(ui.status, txt);
     }
 }
@@ -326,6 +363,28 @@ static void row_clicked(lv_event_t *e)
     if (ui.herd.play) ui.herd.play(i, ui.herd.user);
 }
 
+static void live_paint(void)
+{
+    lv_obj_set_style_bg_opa(ui.live_btn, ui.live ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(ui.live_btn, 0), lv_color_hex(ui.live ? C_BG : C_WOOL), 0);
+}
+
+static void live_clicked(lv_event_t *e)
+{
+    (void)e;
+    ui.live = !ui.live;
+    live_paint();
+    ilf_ui_voice_state(ui.live ? ILF_VOICE_LIVE_READY : ILF_VOICE_IDLE, 0);
+    if (ui.herd.live) ui.herd.live(ui.live, ui.herd.user);
+}
+
+bool ilf_ui_live_on(void) { return ui.live; }
+
+void ilf_ui_live_from(const char *name)
+{
+    snprintf(ui.live_from, sizeof ui.live_from, "%s", name ? name : "");
+}
+
 static void build_voice(lv_obj_t *tile)
 {
     lv_obj_t *t = label(tile, &ilf_font_48, C_WOOL, "Голосовые");
@@ -352,6 +411,20 @@ static void build_voice(lv_obj_t *tile)
     lv_obj_add_event_cb(ui.rec_btn, rec_event, LV_EVENT_ALL, NULL);
     ui.rec_dot = blob(ui.rec_btn, 41, 41, 30, 30, C_WOOL);
 
+    /* рация: справа от кнопки записи; включена — говоришь, и друг слышит сразу */
+    ui.live_btn = plain(tile);
+    lv_obj_add_flag(ui.live_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(ui.live_btn, 96, 46);
+    lv_obj_set_pos(ui.live_btn, 254, 311);
+    lv_obj_set_ext_click_area(ui.live_btn, 8);
+    lv_obj_set_style_radius(ui.live_btn, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_color(ui.live_btn, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_border_width(ui.live_btn, 3, 0);
+    lv_obj_set_style_bg_color(ui.live_btn, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_bg_opa(ui.live_btn, LV_OPA_TRANSP, 0);
+    lv_obj_add_event_cb(ui.live_btn, live_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_center(label(ui.live_btn, &ilf_font_24, C_WOOL, "Рация"));
+
     ui.voice_lbl = label(tile, &ilf_font_24, C_SOFT, "");
     lv_obj_set_width(ui.voice_lbl, ILF_SCREEN_W);
     lv_obj_set_style_text_align(ui.voice_lbl, LV_TEXT_ALIGN_CENTER, 0);
@@ -362,7 +435,7 @@ static void build_voice(lv_obj_t *tile)
 void ilf_ui_voice_state(ilf_voice_state_t st, float value)
 {
     if (!ui.voice_lbl) return;
-    bool rec = st == ILF_VOICE_RECORDING;
+    bool rec = st == ILF_VOICE_RECORDING || st == ILF_VOICE_LIVE_TALK;
     /* запись: точка становится квадратиком «стоп» и краснеет */
     lv_obj_set_style_radius(ui.rec_dot, rec ? 8 : LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(ui.rec_dot, lv_color_hex(rec ? C_NOSE : C_WOOL), 0);
@@ -370,7 +443,12 @@ void ilf_ui_voice_state(ilf_voice_state_t st, float value)
     switch (st) {
     case ILF_VOICE_IDLE:       lv_label_set_text(ui.voice_lbl, "Зажми и говори"); break;
     case ILF_VOICE_NO_FRIENDS: lv_label_set_text(ui.voice_lbl, "Стукнись с другом, чтобы дружить"); break;
-    case ILF_VOICE_RECORDING:  lv_label_set_text_fmt(ui.voice_lbl, "0:%02d · отпусти, и уйдёт", (int)value); break;
+    case ILF_VOICE_RECORDING:
+        lv_label_set_text_fmt(ui.voice_lbl, "%d:%02d · отпусти, и уйдёт", (int)value / 60, (int)value % 60);
+        break;
+    case ILF_VOICE_LIVE_READY: lv_label_set_text(ui.voice_lbl, "Рация: зажми и говори"); break;
+    case ILF_VOICE_LIVE_TALK:  lv_label_set_text_fmt(ui.voice_lbl, "В эфире · %d:%02d", (int)value / 60, (int)value % 60); break;
+    case ILF_VOICE_LIVE_HEAR:  lv_label_set_text_fmt(ui.voice_lbl, "Говорит %s", ui.live_from[0] ? ui.live_from : "друг"); break;
     case ILF_VOICE_SENDING:    lv_label_set_text_fmt(ui.voice_lbl, "Отправляю… %d%%", (int)(value * 100)); break;
     case ILF_VOICE_SENT:       lv_label_set_text(ui.voice_lbl, "Доставлено"); break;
     case ILF_VOICE_FAILED:     lv_label_set_text(ui.voice_lbl, "Друг не рядом, не дошло"); break;
@@ -384,7 +462,8 @@ void ilf_ui_voice_list(const ilf_ui_voice_item_t *items, int count)
         bool on = i < count;
         show(ui.rows[i], on);
         if (!on) continue;
-        lv_label_set_text_fmt(ui.row_lbl[i], "%s · 0:%02u", items[i].from, (unsigned)items[i].seconds);
+        lv_label_set_text_fmt(ui.row_lbl[i], "%s · %u:%02u", items[i].from, (unsigned)items[i].seconds / 60,
+                              (unsigned)items[i].seconds % 60);
         lv_obj_set_style_bg_color(ui.row_dot[i], lv_color_hex(items[i].unplayed ? C_NOSE : C_TRACK), 0);
     }
 }
@@ -409,6 +488,7 @@ static void canvas_line(lv_point_t a, lv_point_t b, uint32_t color)
     d.p2.x = b.x; d.p2.y = b.y;
     lv_draw_line(&layer, &d);
     lv_canvas_finish_layer(ui.canvas, &layer);
+    ui.drawn = true;
 }
 
 static void flush_stroke(bool force)
@@ -463,9 +543,19 @@ static void canvas_event(lv_event_t *e)
     }
 }
 
+/* Перед очисткой отдать рисунок на сохранение (потом уедет на Яндекс Диск). */
+static void save_drawing(void)
+{
+    if (!ui.drawn || !ui.herd.save_drawing) return;
+    lv_draw_buf_t *b = lv_canvas_get_draw_buf(ui.canvas);
+    if (b && b->header.stride == CANVAS_W * 2) ui.herd.save_drawing((const uint16_t *)b->data, CANVAS_W, CANVAS_H, ui.herd.user);
+}
+
 void ilf_ui_draw_clear(void)
 {
     if (!ui.canvas) return;
+    save_drawing();
+    ui.drawn = false;
     lv_canvas_fill_bg(ui.canvas, lv_color_hex(C_BG), LV_OPA_COVER);
     memset(ui.remote, 0, sizeof ui.remote);
 }
@@ -633,7 +723,9 @@ void ilf_ui_init(void)
     build_voice(ui.tiles[ILF_APP_VOICE]);
     build_draw(ui.tiles[ILF_APP_DRAW]);
     ilf_ui_build_music(ui.tiles[ILF_APP_MUSIC]);
+    ilf_ui_build_games(ui.tiles[ILF_APP_GAMES]);
     build_clock(ui.tiles[ILF_APP_CLOCK]);
+    ilf_ui_build_settings(ui.tiles[ILF_APP_SETTINGS]);
 
     /* поверх всех экранов: заряд сверху и точки-страницы снизу */
     lv_obj_t *top = lv_layer_top();

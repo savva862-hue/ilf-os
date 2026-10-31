@@ -9,6 +9,7 @@
  *  CONFIRM : target_mac[6] proof[8]                     — широковещательно
  *  CHUNK   : msg_id(u16) idx(u16) total(u16) kind(u8) data[..229]   — другу, шифровано
  *  STROKE  : stroke_id(u8) flags(u8) n(u8) n×(x u16, y u16)         — другу, шифровано
+ *  LIVE    : seq(u16) data[0..229]                                  — рация, другу, шифровано
  */
 #define MAGIC       0xF1
 #define VERSION     1
@@ -16,6 +17,7 @@
 #define T_CONFIRM   2
 #define T_CHUNK     3
 #define T_STROKE    4
+#define T_LIVE      5
 #define HDR         3
 #define CHUNK_HDR   (HDR + 7)
 #define MAX_CHUNKS  (ILF_HERD_MAX_MESSAGE / ILF_HERD_CHUNK_DATA)
@@ -502,6 +504,29 @@ void ilf_herd_send_stroke(ilf_herd_t *h, int friend_idx, const ilf_stroke_t *s, 
     }
 }
 
+bool ilf_herd_send_live(ilf_herd_t *h, int friend_idx, uint16_t seq, const uint8_t *data, size_t len, uint32_t now)
+{
+    if (len > ILF_HERD_CHUNK_DATA) return false;
+    uint8_t p[HDR + 2 + ILF_HERD_CHUNK_DATA];
+    header(p, T_LIVE);
+    put16(p + HDR, seq);
+    if (len) memcpy(p + HDR + 2, data, len);
+    bool ok = true;
+    for (int i = 0; i < h->nfriends; i++) {
+        if (friend_idx != ILF_HERD_ALL && friend_idx != i) continue;
+        /* очередь почти полна — живой звук уступает служебным пакетам */
+        if (h->ctrl_count >= CTRL_QUEUE - 2 || !enqueue(h, h->friends[i].mac, p, HDR + 2 + len, now)) ok = false;
+    }
+    return ok;
+}
+
+static void on_live(ilf_herd_t *h, int fi, const uint8_t *p, size_t len)
+{
+    if (len < HDR + 2 || len > HDR + 2 + ILF_HERD_CHUNK_DATA) return;
+    emit(h, (ilf_herd_event_t){ .type = ILF_HERD_EV_LIVE, .friend_idx = fi, .msg_id = get16(p + HDR),
+                                .data = p + HDR + 2, .len = len - HDR - 2 });
+}
+
 static void on_stroke(ilf_herd_t *h, int fi, const uint8_t *p, size_t len)
 {
     if (len < HDR + 3) return;
@@ -532,6 +557,7 @@ void ilf_herd_on_recv(ilf_herd_t *h, const uint8_t mac[6], const uint8_t *data, 
     h->friends[fi].last_seen_ms = now;
     if (data[2] == T_CHUNK) on_chunk(h, fi, data, len, now);
     else if (data[2] == T_STROKE) on_stroke(h, fi, data, len);
+    else if (data[2] == T_LIVE) on_live(h, fi, data, len);
 }
 
 void ilf_herd_tick(ilf_herd_t *h, uint32_t now)

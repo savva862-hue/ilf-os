@@ -19,14 +19,14 @@ LV_FONT_DECLARE(ilf_font_48);
 #define C_MUTED 0x8F879B
 
 #define NOTE_SHOW_MS 6000
-#define CALL_SHOW_MS 45000
+#define ASK_SHOW_MS  45000
 
 static struct {
     ilf_ui_phone_cb_t cb;
     bool connected;
     char ble_name[32];
     /* музыка */
-    lv_obj_t *song, *artist, *hint, *btn[3], *play_lbl;
+    lv_obj_t *song, *artist, *hint, *btn[5], *play_lbl;
     bool playing;
     /* код */
     lv_obj_t *pass;
@@ -34,7 +34,7 @@ static struct {
     lv_obj_t *card;
     lv_timer_t *card_timer;
     uint32_t card_uid;
-    bool card_call;
+    bool card_sticky;
     ilf_ui_ask_cb ask_cb;
     void *ask_user;
 } ph;
@@ -98,6 +98,10 @@ static void music_hint(void)
         snprintf(buf, sizeof buf, "Подключи iPhone:\nBluetooth » %s", ph.ble_name[0] ? ph.ble_name : "ILF");
         lv_label_set_text(ph.hint, buf);
     }
+    for (int i = 3; i < 5; i++) {
+        if (ph.connected) lv_obj_remove_flag(ph.btn[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(ph.btn[i], LV_OBJ_FLAG_HIDDEN);
+    }
     for (int i = 0; i < 3; i++) {
         lv_obj_set_style_border_color(ph.btn[i], lv_color_hex(ph.connected ? C_WOOL : C_MUTED), 0);
         lv_obj_set_style_text_color(lv_obj_get_child(ph.btn[i], 0), lv_color_hex(ph.connected ? C_WOOL : C_MUTED), 0);
@@ -136,6 +140,14 @@ void ilf_ui_build_music(lv_obj_t *tile)
         lv_obj_t *l = mk_label(ph.btn[i], i == 1 ? &ilf_font_32 : &ilf_font_24, C_WOOL, syms[i]);
         lv_obj_center(l);
         if (i == 1) ph.play_lbl = l;
+    }
+    /* громкость iPhone: «−» и «+» под пультом */
+    static const char *vol[2] = { "-", "+" };
+    for (int i = 0; i < 2; i++) {
+        ilf_ui_music_btn_t id = i ? ILF_UI_MUSIC_VOL_UP : ILF_UI_MUSIC_VOL_DOWN;
+        ph.btn[3 + i] = round_btn(tile, 134 + i * 100, 352, 54, C_SOFT, 3);
+        lv_obj_add_event_cb(ph.btn[3 + i], music_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)id);
+        lv_obj_center(mk_label(ph.btn[3 + i], &ilf_font_32, C_SOFT, vol[i]));
     }
 
     ph.hint = mk_label(tile, &ilf_font_24, C_SOFT, "");
@@ -195,7 +207,7 @@ void ilf_ui_passkey(int32_t code)
 static void card_drop(void)
 {
     if (ph.card) { lv_obj_delete(ph.card); ph.card = NULL; }
-    ph.card_call = false;
+    ph.card_sticky = false;
     ilf_ui_ask_cb cb = ph.ask_cb;
     ph.ask_cb = NULL;
     if (cb) cb(-1, ph.ask_user);
@@ -217,42 +229,39 @@ static void card_timeout(lv_timer_t *t)
 static void card_clicked(lv_event_t *e)
 {
     (void)e;
-    if (!ph.card_call) card_close();
+    if (!ph.card_sticky) card_close();
 }
 
-static void call_clicked(lv_event_t *e)
+static void ask_clicked(lv_event_t *e)
 {
-    bool accept = lv_event_get_user_data(e) != NULL;
-    uint32_t uid = ph.card_uid;
+    bool yes = lv_event_get_user_data(e) != NULL;
     ilf_ui_ask_cb ask = ph.ask_cb;
     ph.ask_cb = NULL;   /* ответили — card_close не должен звать «не сейчас» */
     card_close();
-    if (ask) ask(accept ? 1 : 0, ph.ask_user);
-    else if (ph.cb.call) ph.cb.call(uid, accept, ph.cb.user);
+    if (ask) ask(yes ? 1 : 0, ph.ask_user);
 }
 
 static void build_card(const char *head_text, const char *title, const char *text, bool buttons);
 
-void ilf_ui_notify(const char *app, const char *title, const char *text, bool call, uint32_t uid)
+void ilf_ui_notify(const char *app, const char *title, const char *text, uint32_t uid)
 {
-    /* звонок и вопрос не перебиваем обычным уведомлением */
-    if ((ph.card_call || ph.ask_cb) && !call) return;
+    /* вопрос не перебиваем уведомлением */
+    if (ph.card_sticky) return;
     card_close();
     ph.card_uid = uid;
-    ph.card_call = call;
-    build_card(call ? "Звонок" : (app ? app : ""), title, text, call);
+    build_card(app ? app : "", title, text, false);
 }
 
 void ilf_ui_ask(const char *head, const char *title, const char *text, ilf_ui_ask_cb cb, void *user)
 {
     card_close();
-    ph.card_call = true;   /* тап мимо кнопок не закрывает */
+    ph.card_sticky = true;   /* тап мимо кнопок не закрывает */
     build_card(head, title, text, true);
     ph.ask_cb = cb;
     ph.ask_user = user;
 }
 
-static void build_card(const char *head_text, const char *title, const char *text, bool call)
+static void build_card(const char *head_text, const char *title, const char *text, bool ask)
 {
     lv_obj_t *c = ph.card = mk_box(lv_layer_top());
     lv_obj_set_width(c, ILF_SCREEN_W - 24);
@@ -286,17 +295,17 @@ static void build_card(const char *head_text, const char *title, const char *tex
         lv_obj_set_style_max_height(m, 64, 0);   /* две строки */
         lv_label_set_long_mode(m, LV_LABEL_LONG_DOT);
     }
-    if (call) {
+    if (ask) {
         lv_obj_t *row = mk_box(c);
         lv_obj_set_size(row, LV_PCT(100), 92);
         lv_obj_t *no = round_btn(row, 80, 46, 80, C_NOSE, 5);
-        lv_obj_add_event_cb(no, call_clicked, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(no, ask_clicked, LV_EVENT_CLICKED, NULL);
         lv_obj_center(mk_label(no, &ilf_font_48, C_NOSE, "×"));
         lv_obj_t *yes = round_btn(row, 240, 46, 80, C_WOOL, 5);
-        lv_obj_add_event_cb(yes, call_clicked, LV_EVENT_CLICKED, (void *)1);
+        lv_obj_add_event_cb(yes, ask_clicked, LV_EVENT_CLICKED, (void *)1);
         lv_obj_center(mk_label(yes, &ilf_font_32, C_WOOL, LV_SYMBOL_OK));
     }
-    ph.card_timer = lv_timer_create(card_timeout, call ? CALL_SHOW_MS : NOTE_SHOW_MS, NULL);
+    ph.card_timer = lv_timer_create(card_timeout, ask ? ASK_SHOW_MS : NOTE_SHOW_MS, NULL);
     lv_timer_set_repeat_count(ph.card_timer, 1);
 }
 

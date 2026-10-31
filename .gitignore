@@ -6,3 +6,4 @@ dependencies.lock
 sim/out/*.ppm
 .vscode/
 sim/web/out/
+sdkconfig.secrets

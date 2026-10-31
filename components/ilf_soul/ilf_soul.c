@@ -187,7 +187,17 @@ void ilf_soul_update(ilf_soul_t *s, uint32_t now_ms)
         s->target_gaze_y = ((float)rng_range(s, 0, 60) - 30.f) / 100.f;
         s->next_wander_ms = now_ms + rng_range(s, 1500, 4000);
     }
+    /* на зарядке барашек жуёт клевер, если не спит и не расстроен */
+    f->eating = s->charging && (e == ILF_EMO_CALM || e == ILF_EMO_HAPPY);
+    if (f->eating) {
+        float p = (float)(now_ms % ILF_SOUL_CHEW_MS) / (float)ILF_SOUL_CHEW_MS;
+        f->chew = p < 0.5f ? p * 2.f : (1.f - p) * 2.f;
+    } else {
+        f->chew = 0.f;
+    }
+
     float tx = s->target_gaze_x, ty = s->target_gaze_y;
+    if (f->eating && time_reached(now_ms, s->look_until_ms)) { tx *= 0.3f; ty = 0.45f; } /* смотрит на клевер */
     if (e == ILF_EMO_ASLEEP || e == ILF_EMO_SLEEPY) { tx = 0.f; ty = 0.3f; }
     if (e == ILF_EMO_SAD) { ty = 0.6f; }
     f->gaze_x += (tx - f->gaze_x) * 0.25f;

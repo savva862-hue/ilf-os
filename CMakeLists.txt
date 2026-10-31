@@ -1,3 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
+# Ключи Яндекс Диска лежат отдельно и не попадают в git: sdkconfig.secrets (см. README)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.secrets")
+    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.secrets")
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(ilf_os)

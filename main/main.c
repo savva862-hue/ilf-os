@@ -1,11 +1,12 @@
 /*
- * ILF OS v0.3 — «Стадо» и iPhone по Bluetooth.
+ * ILF OS v0.4 — стадо, рация, iPhone, игры, Яндекс Диск.
  *
  * Потоки:
  *   ui-задача  — единственная, кто трогает LVGL: душа, лицо, часы, умный сон,
  *                а ещё стадо (ESP-NOW): знакомство, голосовые, рисунки.
  *   sensors    — гироскоп (встряска/наклон), кнопка, батарея → очередь событий.
- *   audio      — запись и проигрывание голосовых (ilf_voice.c).
+ *   audio      — запись и проигрывание голосовых и рации (ilf_voice.c).
+ *   cloud      — домашний Wi-Fi и выгрузка на Яндекс Диск (ilf_cloud.c).
  * Душа (ilf_soul) не знает про железо: получает события и отдаёт описание лица.
  */
 #include <stdio.h>
@@ -28,6 +29,7 @@
 #include "ilf_net.h"
 #include "ilf_voice.h"
 #include "ilf_ble.h"
+#include "ilf_cloud.h"
 #include "ilf_version.h"
 #include "esp_ota_ops.h"
 #include "esp_spiffs.h"
@@ -48,6 +50,8 @@ static char s_tz[32] = ILF_DEFAULT_TZ;
 
 static QueueHandle_t s_events;
 static ilf_soul_t s_soul;
+/* наклон для игр (доли g), пишет задача датчиков */
+static volatile float s_tilt_x, s_tilt_y;
 
 /* ---------------- хозяин ---------------- */
 
@@ -86,8 +90,8 @@ static void factory_reset(void)
 {
     ESP_LOGW(TAG, "сброс к заводским: друзья, голосовые, хозяин");
     nvs_handle_t h;
-    const char *spaces[] = { "profile", "herd" };
-    for (size_t i = 0; i < 2; i++) {
+    const char *spaces[] = { "profile", "herd", "cloud" };
+    for (size_t i = 0; i < 3; i++) {
         if (nvs_open(spaces[i], NVS_READWRITE, &h) == ESP_OK) { nvs_erase_all(h); nvs_commit(h); nvs_close(h); }
     }
     esp_spiffs_format("storage");
@@ -124,6 +128,8 @@ static void sensors_task(void *arg)
                 }
                 prev_mag = mag;
                 /* наклон: куда «стекает» гравитация. Оси подбираем на живой плате. */
+                s_tilt_x = a.ax;
+                s_tilt_y = -a.ay;
                 int16_t tx = (int16_t)(a.ax * 1000.f);
                 int16_t ty = (int16_t)(-a.ay * 1000.f);
                 if (t - last_tilt > 100 && (abs(tx - tilt_x_prev) > 60 || abs(ty - tilt_y_prev) > 60)) {
@@ -140,7 +146,7 @@ static void sensors_task(void *arg)
             post((ilf_event_t){ .type = ILF_EV_BUTTON, .button = 0 });
             btn_down_at = t;
         }
-        /* забыл PIN: держать кнопку 10 секунд — сброс */
+        /* держать кнопку 10 секунд — сброс к заводским */
         if (btn && t - btn_down_at > FACTORY_RESET_HOLD_MS) s_factory_reset = true;
         btn_prev = btn;
 
@@ -181,7 +187,7 @@ static const char *name_by_mac(const uint8_t mac[6])
 static void refresh_voice_list(void)
 {
     ilf_ui_voice_item_t items[ILF_UI_VOICE_ROWS];
-    int n = ilf_voice_items(items, ILF_UI_VOICE_ROWS, name_by_mac);
+    int n = ilf_voice_items(items, ILF_UI_VOICE_ROWS);
     ilf_ui_voice_list(items, n);
 }
 
@@ -189,7 +195,8 @@ static void refresh_target(void)
 {
     if (s_target >= ilf_herd_friend_count(s_herd)) s_target = ILF_HERD_ALL;
     ilf_ui_set_target(s_target == ILF_HERD_ALL ? "всё стадо" : ilf_herd_friend(s_herd, s_target)->name);
-    ilf_ui_voice_state(ilf_herd_friend_count(s_herd) ? ILF_VOICE_IDLE : ILF_VOICE_NO_FRIENDS, 0);
+    ilf_voice_state_t st = ilf_ui_live_on() ? ILF_VOICE_LIVE_READY : ILF_VOICE_IDLE;
+    ilf_ui_voice_state(ilf_herd_friend_count(s_herd) ? st : ILF_VOICE_NO_FRIENDS, 0);
 }
 
 static void on_herd(const ilf_herd_event_t *ev, void *user)
@@ -207,7 +214,7 @@ static void on_herd(const ilf_herd_event_t *ev, void *user)
         break;
     case ILF_HERD_EV_MESSAGE:
         if (ev->kind != ILF_MSG_VOICE || !f) break;
-        ilf_voice_store(f->mac, ev->data, ev->len);
+        ilf_voice_store(f->mac, f->name, ev->data, ev->len, false);
         refresh_voice_list();
         snprintf(buf, sizeof buf, "Голосовое от %s", f->name);
         pet_note(buf, t);
@@ -216,6 +223,13 @@ static void on_herd(const ilf_herd_event_t *ev, void *user)
         break;
     case ILF_HERD_EV_STROKE:
         ilf_ui_draw_remote(ev->friend_idx, ev->stroke);
+        break;
+    case ILF_HERD_EV_LIVE:
+        /* рация: звук сразу в динамик; пустой пакет — друг просто в эфире */
+        if (ev->len && f) {
+            ilf_ui_live_from(f->name);
+            ilf_voice_live_feed(ev->data, ev->len);
+        }
         break;
     case ILF_HERD_EV_SENT:
         if (ev->ok) s_sent_ok++;
@@ -235,9 +249,10 @@ static void ui_record(bool start, void *user)
     (void)user;
     if (!ilf_herd_friend_count(s_herd)) { ilf_ui_voice_state(ILF_VOICE_NO_FRIENDS, 0); return; }
     if (start) {
-        if (ilf_herd_sending(s_herd)) return;
-        ilf_voice_record_start();
-        ilf_ui_voice_state(ILF_VOICE_RECORDING, 0);
+        bool live = ilf_ui_live_on();
+        if (!live && ilf_herd_sending(s_herd)) return;
+        ilf_voice_record_start(live);
+        ilf_ui_voice_state(live ? ILF_VOICE_LIVE_TALK : ILF_VOICE_RECORDING, 0);
     } else {
         ilf_voice_record_stop();
     }
@@ -271,6 +286,70 @@ static void ui_clear(void *user)
     (void)user;
     ilf_stroke_t st = { .clear = true };
     ilf_herd_send_stroke(s_herd, s_target, &st, now_ms());
+}
+
+static void ui_live(bool on, void *user)
+{
+    (void)user;
+    if (!on && ilf_voice_recording()) ilf_voice_record_stop();
+    refresh_target();
+}
+
+static void ui_save_drawing(const uint16_t *px, int w, int h, void *user)
+{
+    (void)user;
+    ilf_voice_save_drawing(px, w, h);
+}
+
+/* ---------------- настройки ---------------- */
+
+static int s_volume = 70;
+
+static void ui_volume(int percent, void *user)
+{
+    (void)user;
+    s_volume = percent;
+    ilf_audio_set_volume((uint8_t)percent);
+    nvs_handle_t h;
+    if (nvs_open("profile", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "vol", (uint8_t)percent);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void volume_load(void)
+{
+    nvs_handle_t h;
+    uint8_t v;
+    if (nvs_open("profile", NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, "vol", &v) == ESP_OK && v <= 100) s_volume = v;
+        nvs_close(h);
+    }
+    ilf_audio_set_volume((uint8_t)s_volume);
+}
+
+static void ui_wifi_scan(void *user) { (void)user; ilf_cloud_scan(); }
+static void ui_wifi_join(const char *ssid, const char *pass, void *user) { (void)user; ilf_cloud_join(ssid, pass); }
+static void ui_wifi_forget(void *user) { (void)user; ilf_cloud_forget(); }
+static void ui_disk(void *user) { (void)user; ilf_cloud_disk_tap(); }
+
+static void cloud_frame(void)
+{
+    ilf_cloud_event_t ev;
+    while (ilf_cloud_poll(&ev)) {
+        switch (ev.type) {
+        case ILF_CLOUD_EV_SCAN: {
+            const char *list[ILF_CLOUD_SSIDS];
+            for (int i = 0; i < ev.n; i++) list[i] = ev.ssids[i];
+            ilf_ui_wifi_list(list, ev.n);
+            break;
+        }
+        case ILF_CLOUD_EV_WIFI:      ilf_ui_wifi_status(ev.text); break;
+        case ILF_CLOUD_EV_DISK:      ilf_ui_disk_status(ev.text); break;
+        case ILF_CLOUD_EV_DISK_CODE: ilf_ui_disk_code(ev.url[0] ? ev.url : NULL, ev.code); break;
+        case ILF_CLOUD_EV_SYNCED:    refresh_voice_list(); break;
+        }
+    }
 }
 
 /* ---------------- обновление от друга ---------------- */
@@ -319,14 +398,34 @@ static void herd_frame(uint32_t t)
 {
     ilf_net_poll(t);
 
-    static bool was_recording, was_playing;
+    static bool was_recording, was_playing, was_hearing;
+    static uint16_t live_seq;
+    static uint32_t live_ping;
+    bool live = ilf_ui_live_on();
     if (ilf_voice_recording()) {
-        ilf_ui_voice_state(ILF_VOICE_RECORDING, ilf_voice_recorded_seconds());
+        ilf_ui_voice_state(live ? ILF_VOICE_LIVE_TALK : ILF_VOICE_RECORDING, ilf_voice_recorded_seconds());
     }
+    /* рация: записанные блоки сразу в эфир */
+    uint8_t blk[ILF_ADPCM_BLOCK_BYTES];
+    while (ilf_voice_live_take(blk)) {
+        ilf_herd_send_live(s_herd, s_target, live_seq++, blk, sizeof blk, t);
+        live_ping = t;
+    }
+    /* рация включена — раз в 0.6 с «я в эфире», чтобы радио друзей не дремало */
+    if (live && ilf_herd_friend_count(s_herd) && (int32_t)(t - live_ping) > 600) {
+        live_ping = t;
+        ilf_herd_send_live(s_herd, s_target, live_seq, NULL, 0, t);
+    }
+    bool hearing = ilf_voice_live_hearing();
+    if (hearing && !ilf_voice_recording()) ilf_ui_voice_state(ILF_VOICE_LIVE_HEAR, 0);
+    if (was_hearing && !hearing) refresh_target();
+    was_hearing = hearing;
     uint8_t *rec;
     size_t len;
     if (ilf_voice_take_recording(&rec, &len)) {
         s_sent_ok = 0;
+        static const uint8_t me[6] = { 0 };
+        ilf_voice_store(me, "я", rec, len, true);   /* своё — только для Яндекс Диска */
         if (ilf_herd_send(s_herd, s_target, ILF_MSG_VOICE, rec, len, t)) {
             ilf_ui_voice_state(ILF_VOICE_SENDING, 0);
         } else {
@@ -335,7 +434,7 @@ static void herd_frame(uint32_t t)
         }
         free(rec);
     } else if (was_recording && !ilf_voice_recording()) {
-        refresh_target();   /* слишком короткая запись — просто вернуться */
+        refresh_target();   /* рация отпущена или слишком короткая запись — просто вернуться */
     }
     was_recording = ilf_voice_recording();
     if (ilf_herd_sending(s_herd)) ilf_ui_voice_state(ILF_VOICE_SENDING, ilf_herd_send_progress(s_herd));
@@ -372,14 +471,9 @@ static const char *ble_name(void) { return s_has_profile ? s_profile.sheep : "IL
 static void ui_music(ilf_ui_music_btn_t btn, void *user)
 {
     (void)user;
-    static const ilf_ams_cmd_t map[] = { ILF_AMS_PREV, ILF_AMS_TOGGLE, ILF_AMS_NEXT };
+    static const ilf_ams_cmd_t map[] = { ILF_AMS_PREV, ILF_AMS_TOGGLE, ILF_AMS_NEXT,
+                                         ILF_AMS_VOL_DOWN, ILF_AMS_VOL_UP };
     ilf_ble_music(map[btn]);
-}
-
-static void ui_call(uint32_t uid, bool accept, void *user)
-{
-    (void)user;
-    ilf_ble_call(uid, accept);
 }
 
 static void save_tz(const char *tz)
@@ -422,8 +516,8 @@ static bool phone_frame(uint32_t t)
             ilf_ui_music(ev.music.title, ev.music.artist, ev.music.playing);
             break;
         case ILF_BLE_EV_NOTE: {
-            bool call = ev.category == ILF_ANCS_CAT_CALL;
-            ilf_ui_notify(ilf_phone_app_name(ev.note.app), ev.note.title, ev.note.message, call, ev.note.uid);
+            if (ev.category == ILF_ANCS_CAT_CALL) break;   /* звонки на барашке не показываем */
+            ilf_ui_notify(ilf_phone_app_name(ev.note.app), ev.note.title, ev.note.message, ev.note.uid);
             /* барашек замечает уведомление: смотрит наверх */
             ilf_soul_handle(&s_soul, &(ilf_event_t){ .type = ILF_EV_TOUCH, .touch = { ILF_SCREEN_W / 2, 40 } }, t);
             wake = true;
@@ -458,13 +552,21 @@ static void ui_task(void *arg)
     s_herd = ilf_net_init(on_herd, NULL);
     ilf_net_set_ota_cb(on_ota, NULL);
     ilf_ui_herd_cb_t cb = { .record = ui_record, .next_target = ui_next_target, .play = ui_play,
-                            .stroke = ui_stroke, .clear = ui_clear };
+                            .stroke = ui_stroke, .clear = ui_clear, .live = ui_live,
+                            .save_drawing = ui_save_drawing };
     ilf_ui_set_herd_cb(&cb);
     refresh_target();
     refresh_voice_list();
 
     profile_load();
-    ilf_ui_phone_cb_t pcb = { .music = ui_music, .call = ui_call };
+    volume_load();
+    ilf_ui_settings_volume(s_volume);
+    ilf_ui_set_version(ILF_FW_VERSION);
+    ilf_ui_settings_cb_t scb = { .volume = ui_volume, .wifi_scan = ui_wifi_scan, .wifi_join = ui_wifi_join,
+                                 .wifi_forget = ui_wifi_forget, .disk_link = ui_disk };
+    ilf_ui_set_settings_cb(&scb);
+    ilf_cloud_init(ble_name());
+    ilf_ui_phone_cb_t pcb = { .music = ui_music };
     ilf_ui_set_phone_cb(&pcb);
     ilf_ui_phone(false, ble_name());
     ilf_ble_init(ble_name());
@@ -493,13 +595,18 @@ static void ui_task(void *arg)
         bool woke = ilf_touch_take_wake();
         while (xQueueReceive(s_events, &ev, 0) == pdTRUE) {
             ilf_soul_handle(&s_soul, &ev, t);
-            /* удар о другого барашка — знакомство; без второго удара ничего не случится */
-            if (ev.type == ILF_EV_SHAKE && s_has_profile) ilf_herd_bump(s_herd, t);
+            /* удар о другого барашка — знакомство; без второго удара ничего не случится.
+               В игре встряска — для шара предсказаний, не для знакомства. */
+            if (ev.type == ILF_EV_SHAKE && ilf_ui_game_active()) ilf_ui_shake();
+            else if (ev.type == ILF_EV_SHAKE && s_has_profile) ilf_herd_bump(s_herd, t);
             if (ev.type == ILF_EV_BATTERY) ilf_ui_update_battery(ev.battery.percent, ev.battery.charging);
             if (ev.type == ILF_EV_SHAKE || ev.type == ILF_EV_BUTTON || ev.type == ILF_EV_FRIEND_MESSAGE) woke = true;
         }
         /* пока пишем, слушаем или отправляем — экран не гаснет */
-        if (ilf_voice_recording() || ilf_voice_playing() || ilf_herd_sending(s_herd)) woke = true;
+        if (ilf_voice_recording() || ilf_voice_playing() || ilf_herd_sending(s_herd) || ilf_voice_live_hearing() ||
+            ilf_ui_game_active()) {
+            woke = true;
+        }
         if (woke) {
             last_activity = t;
             if (screen_off || dimmed) {
@@ -520,6 +627,16 @@ static void ui_task(void *arg)
             factory_reset();
         }
         herd_frame(t);
+        cloud_frame();
+        ilf_ui_tilt(s_tilt_x, s_tilt_y);
+        /* выгрузка на Диск, когда барашек свободен: на зарядке чаще (скорее всего дома) */
+        static uint32_t next_sync = 90000;
+        if ((int32_t)(t - next_sync) > 0) {
+            bool idle = !ilf_voice_recording() && !ilf_voice_playing() && !ilf_herd_sending(s_herd) &&
+                        !ilf_ui_live_on() && !ilf_voice_live_hearing() && !ilf_herd_pairing(s_herd);
+            if (idle && ilf_cloud_ready()) ilf_cloud_sync();
+            next_sync = t + (s_soul.charging ? 20u : 120u) * 60u * 1000u;
+        }
         if (phone_frame(t)) {
             last_activity = t;
             if (screen_off || dimmed) {
@@ -539,7 +656,7 @@ static void ui_task(void *arg)
             dimmed = true;
             ilf_display_set_brightness(DIM_LEVEL);
         }
-        ilf_net_keep_listening(!screen_off);
+        ilf_net_keep_listening(!screen_off || ilf_ui_live_on());
 
         if (screen_off) {
             /* экран тёмный: не рисуем, только душа, стадо и датчики */

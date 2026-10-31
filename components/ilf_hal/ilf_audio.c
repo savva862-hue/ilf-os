@@ -23,6 +23,7 @@ static const char *TAG = "ilf_audio";
 static i2c_master_dev_handle_t s_codec;
 static i2s_chan_handle_t s_tx, s_rx;
 static bool s_ok;
+static uint8_t s_volume = ILF_AUDIO_VOLUME;
 
 static esp_err_t wr(uint8_t reg, uint8_t val) { return ilf_i2c_write_reg(s_codec, reg, val); }
 
@@ -45,10 +46,11 @@ static esp_err_t codec_init(void)
         { 0x15, 0x40 }, { 0x1B, 0x0A }, { 0x1C, 0x6A },
         { 0x17, ILF_MIC_DIGITAL },
         { 0x37, 0x08 },
-        { 0x32, ILF_AUDIO_VOLUME },
+        { 0x32, 0 },                         /* громкость — ниже, из настроек */
     };
     for (size_t i = 0; i < sizeof seq / sizeof seq[0]; i++) {
-        ESP_RETURN_ON_ERROR(wr(seq[i][0], seq[i][1]), TAG, "ES8311 reg 0x%02x", seq[i][0]);
+        uint8_t v = seq[i][0] == 0x32 ? s_volume : seq[i][1];
+        ESP_RETURN_ON_ERROR(wr(seq[i][0], v), TAG, "ES8311 reg 0x%02x", seq[i][0]);
     }
     return ESP_OK;
 }
@@ -125,4 +127,12 @@ size_t ilf_audio_write(const int16_t *pcm, size_t samples, uint32_t timeout_ms)
     size_t put = 0;
     i2s_channel_write(s_tx, pcm, samples * sizeof(int16_t), &put, pdMS_TO_TICKS(timeout_ms));
     return put / sizeof(int16_t);
+}
+
+void ilf_audio_set_volume(uint8_t percent)
+{
+    if (percent > 100) percent = 100;
+    /* рег. 0x32: 0xBF = 0 дБ, шаг 0.5 дБ. 1..100% → −30..0 дБ, 0% — тишина */
+    s_volume = percent ? (uint8_t)(ILF_AUDIO_VOLUME - 60 + (60 * percent) / 100) : 0;
+    if (s_codec) wr(0x32, s_volume);
 }
