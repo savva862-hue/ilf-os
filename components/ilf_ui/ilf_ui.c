@@ -1,4 +1,4 @@
-#include "ilf_ui_priv.h"
+#include "ilf_ui.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -540,24 +540,6 @@ void ilf_ui_set_sheep_name(const char *name)
     if (ui.sheep_lbl) lv_label_set_text(ui.sheep_lbl, name ? name : "");
 }
 
-/* замок: листать нельзя, смахнул барашка — панель PIN */
-static void gesture_event(lv_event_t *e)
-{
-    (void)e;
-    if (ilf_ui_locked()) ilf_ui_lock_show_pad();
-}
-
-void ilf_ui_set_locked(bool locked, ilf_ui_pin_cb cb, void *user)
-{
-    ilf_ui_lock_state(locked, cb, user);
-    if (locked) {
-        ilf_ui_show_app(ILF_APP_PET, false);
-        lv_obj_set_scroll_dir(ui.tileview, LV_DIR_NONE);
-    } else {
-        lv_obj_set_scroll_dir(ui.tileview, LV_DIR_HOR);
-    }
-}
-
 void ilf_ui_pet_note(const char *text)
 {
     if (!ui.pet_note) return;
@@ -667,7 +649,6 @@ void ilf_ui_init(void)
     lv_obj_set_style_bg_opa(ui.tileview, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(ui.tileview, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_event_cb(ui.tileview, tile_changed, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(lv_screen_active(), gesture_event, LV_EVENT_GESTURE, NULL);
 
     for (int i = 0; i < ILF_APP_COUNT; i++) {
         lv_dir_t dir = LV_DIR_NONE;

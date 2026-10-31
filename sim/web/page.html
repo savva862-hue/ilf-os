@@ -69,7 +69,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   <div class="side">
     <div>
       <h1>Тестер барашка ILF</h1>
-      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны, первый запуск и PIN. Радио, звук и второй барашек тут понарошку, их заменяют кнопки ниже.</p>
+      <p class="lead">Здесь работает тот же код, что прошивается в барашка: душа, экраны и первый запуск. Радио, звук и второй барашек тут понарошку, их заменяют кнопки ниже.</p>
     </div>
 
     <ul class="tips">
@@ -199,7 +199,7 @@ button.act:focus-visible, .boot:focus-visible, .screen:focus-visible { outline: 
   on('fdraw', () => { wake(); e.ilf_web_event(EV.fdraw); });
   on('low', () => { wake(); e.ilf_web_event(EV.low); });
   on('ok', () => { wake(); e.ilf_web_event(EV.ok); });
-  on('off', () => { off = true; e.ilf_web_event(EV.off); draw(); say('Экран погас. Нажми на экран или на кнопку сбоку, и барашек попросит PIN.'); });
+  on('off', () => { off = true; e.ilf_web_event(EV.off); draw(); say('Экран погас. Нажми на экран или на кнопку сбоку, чтобы разбудить.'); });
   on('restart', async () => { await boot(); say('Барашек как из коробки.'); });
   document.getElementById('boot').addEventListener('click', wake);
 })();

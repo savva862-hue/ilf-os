@@ -1,5 +1,5 @@
 /*
- * Тестер ILF OS в браузере: настоящий код души, экрана, замка и первого запуска,
+ * Тестер ILF OS в браузере: настоящий код души, экрана и первого запуска,
  * собранный в WebAssembly. Железо и второй барашек — понарошку (кнопки на странице).
  */
 #include <stdint.h>
@@ -9,7 +9,6 @@
 
 #include "lvgl.h"
 #include "ilf_clock.h"
-#include "ilf_lock.h"
 #include "ilf_soul.h"
 #include "ilf_ui.h"
 
@@ -34,20 +33,10 @@ static bool sending;
 static float rec_secs;
 static ilf_ui_voice_item_t items[ILF_UI_VOICE_ROWS];
 static int nitems;
-static ilf_lock_t lock;
 static bool has_profile;
 static char owner[ILF_HERD_NAME_LEN] = "", sheep[ILF_HERD_NAME_LEN] = "";
 static uint32_t note_until;
 static bool screen_off;
-
-static void toy_sha(const uint8_t *d, size_t n, uint8_t out[32])
-{
-    for (int k = 0; k < 4; k++) {
-        uint64_t x = 1469598103934665603ULL + (uint64_t)k;
-        for (size_t i = 0; i < n; i++) { x ^= d[i]; x *= 1099511628211ULL; }
-        memcpy(out + k * 8, &x, 8);
-    }
-}
 
 static void note(const char *t)
 {
@@ -96,35 +85,11 @@ static void cb_play(int i, void *u)
 static void cb_stroke(const ilf_stroke_t *s, void *u) { (void)s; (void)u; }
 static void cb_clear(void *u) { (void)u; }
 
-static void on_pin(const char *pin, void *u)
-{
-    (void)u;
-    char buf[64];
-    switch (ilf_lock_try(&lock, pin, now_ms, toy_sha)) {
-    case ILF_LOCK_OK: ilf_ui_set_locked(false, NULL, NULL); note(NULL); break;
-    case ILF_LOCK_WRONG: {
-        int left = ILF_LOCK_TRIES - lock.fails;
-        snprintf(buf, sizeof buf, "Неверно, ещё %d %s", left, left == 1 ? "попытка" : "попытки");
-        ilf_ui_lock_message(buf);
-        break;
-    }
-    case ILF_LOCK_WAIT:
-        snprintf(buf, sizeof buf, "Подожди %d с", (int)(ilf_lock_wait_left(&lock, now_ms) / 1000 + 1));
-        ilf_ui_lock_message(buf);
-        break;
-    }
-}
-
 static void on_setup(const ilf_setup_result_t *r, void *u)
 {
     (void)u;
     snprintf(owner, sizeof owner, "%s", r->owner);
     snprintf(sheep, sizeof sheep, "%s", r->sheep);
-    ilf_pin_t pin;
-    uint8_t salt[16] = { 7 };
-    ilf_lock_make_pin(&pin, r->pin, salt, toy_sha);
-    ilf_lock_init(&lock, &pin);
-    ilf_lock_try(&lock, r->pin, now_ms, toy_sha);
     has_profile = true;
     ilf_ui_set_sheep_name(sheep);
 }
@@ -167,7 +132,6 @@ EXPORT(ilf_web_init) void ilf_web_init(uint32_t seed)
                             .stroke = cb_stroke, .clear = cb_clear };
     ilf_ui_set_herd_cb(&cb);
     ilf_ui_update_battery(83, false);
-    ilf_lock_init(&lock, NULL);
     refresh_target();
     ilf_ui_setup_start(on_setup, NULL);
 }
@@ -223,7 +187,7 @@ EXPORT(ilf_web_event) void ilf_web_event(int what)
         break;
     case WEB_BUMP:
         ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_SHAKE }, now_ms);
-        if (ilf_ui_locked() || !has_profile) break;
+        if (!has_profile) break;
         has_friend = true;
         note("Дружим с Мира!");
         ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_FRIEND_MESSAGE }, now_ms + 1);
@@ -262,18 +226,11 @@ EXPORT(ilf_web_event) void ilf_web_event(int what)
     case WEB_SCREEN_OFF:
         screen_off = true;
         memset(fb, 0, sizeof fb);
-        ilf_ui_lock_hide();
-        /* в тестере замок закрывается сразу, на барашке — через 5 минут */
-        ilf_lock_now(&lock);
         break;
     case WEB_SCREEN_ON:
         if (!screen_off) break;
         screen_off = false;
         ilf_soul_handle(&soul, &(ilf_event_t){ .type = ILF_EV_BUTTON }, now_ms);
-        if (has_profile && ilf_lock_is_locked(&lock, now_ms)) {
-            ilf_ui_set_locked(true, on_pin, NULL);
-            note("Смахни, чтобы открыть");
-        }
         lv_obj_invalidate(lv_screen_active());
         break;
     }

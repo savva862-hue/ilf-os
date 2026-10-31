@@ -84,29 +84,18 @@ void ilf_ui_voice_list(const ilf_ui_voice_item_t *items, int count);
 /* Рисунок друга и очистка холста. */
 void ilf_ui_draw_remote(int friend_idx, const ilf_stroke_t *s);
 void ilf_ui_draw_clear(void);
-/* ---------- первый запуск и замок ---------- */
-
-#define ILF_PIN_LEN_UI 4
+/* ---------- первый запуск ---------- */
 
 typedef struct {
     char owner[ILF_HERD_NAME_LEN];   /* как зовут хозяина — так барашка видят друзья */
     char sheep[ILF_HERD_NAME_LEN];   /* как зовут самого барашка */
-    char pin[5];
 } ilf_setup_result_t;
 
 typedef void (*ilf_ui_setup_cb)(const ilf_setup_result_t *r, void *user);
-typedef void (*ilf_ui_pin_cb)(const char *pin, void *user);
 
-/* Знакомство с хозяином: привет → имя хозяина → имя барашка → PIN дважды → готово. */
+/* Знакомство с хозяином: привет → имя хозяина → имя барашка → готово. */
 void ilf_ui_setup_start(ilf_ui_setup_cb done, void *user);
 bool ilf_ui_setup_active(void);
-
-/* Замок: пока закрыт, листать приложения нельзя; смахнул барашка — открывается
-   панель PIN, введённые 4 цифры уходят в cb. */
-void ilf_ui_set_locked(bool locked, ilf_ui_pin_cb cb, void *user);
-bool ilf_ui_locked(void);
-void ilf_ui_lock_message(const char *text);   /* «Неверный PIN» и т.п.; стирает цифры */
-void ilf_ui_lock_hide(void);
 /* Имя барашка в углу экрана питомца */
 void ilf_ui_set_sheep_name(const char *name);
 

@@ -1,13 +1,15 @@
 /*
- * Первый запуск и замок.
+ * Первый запуск: знакомство с хозяином. PIN и замка нет — барашек для друзей.
  *
- * Экран крошечный (1.8"), поэтому клавиатура не «йцукен» в 11 клавиш, а крупная:
- * 12 букв на странице (4×3) и три страницы алфавита. Первая буква имени — заглавная,
+ * Экран крошечный (1.8"), поэтому клавиатура крупная, латиница:
+ * 16 букв на странице (4×4) и две страницы алфавита. Первая буква имени — заглавная,
  * остальные — строчные, сами.
  */
-#include "ilf_ui_priv.h"
+#include "ilf_ui.h"
 
 #include <string.h>
+
+#include "ilf_head_geom.h"
 
 LV_FONT_DECLARE(ilf_font_24);
 LV_FONT_DECLARE(ilf_font_32);
@@ -20,27 +22,23 @@ LV_IMAGE_DECLARE(ilf_head);
 #define C_KEY   0x262422
 #define C_KEY_P 0x4A4642
 #define C_NOSE  0xF2A7B5
+#define C_PUPIL 0x121016
 
 #define NAME_MAX_LETTERS 11
 
-typedef enum { ST_HELLO, ST_OWNER, ST_SHEEP, ST_PIN, ST_PIN2, ST_DONE, ST_LOCK } step_t;
+typedef enum { ST_HELLO, ST_OWNER, ST_SHEEP, ST_DONE } step_t;
 
 static struct {
     lv_obj_t *root;            /* полноэкранная панель поверх всего */
-    lv_obj_t *title, *hint, *field, *field_lbl, *dots[ILF_PIN_LEN_UI], *msg;
-    lv_obj_t *kbd, *pad, *next_btn, *head;
+    lv_obj_t *title, *hint, *field, *field_lbl, *msg;
+    lv_obj_t *kbd, *next_btn, *head;
     step_t step;
     int page;
     char text[ILF_HERD_NAME_LEN];
     int letters;
-    char pin[5], pin_first[5];
     ilf_setup_result_t result;
     ilf_ui_setup_cb done;
     void *done_user;
-    /* замок */
-    bool locked;
-    ilf_ui_pin_cb pin_cb;
-    void *pin_user;
 } st;
 
 /* ---------- помощники ---------- */
@@ -92,14 +90,13 @@ static lv_obj_t *pill_button(lv_obj_t *parent, const char *text, lv_event_cb_t c
     return b;
 }
 
-/* ---------- клавиатура имён ---------- */
+/* ---------- клавиатура имён (латиница) ---------- */
 
-static const char *const pages[3][16] = {
-    { "А", "Б", "В", "Г", "\n", "Д", "Е", "Ж", "З", "\n", "И", "Й", "К", "Л", "\n", NULL },
-    { "М", "Н", "О", "П", "\n", "Р", "С", "Т", "У", "\n", "Ф", "Х", "Ц", "Ч", "\n", NULL },
-    { "Ш", "Щ", "Ы", "Ь", "\n", "Э", "Ю", "Я", "Ё", "\n", "Ъ", "-", "пробел", "\n", NULL },
+static const char *const pages[2][24] = {
+    { "A", "B", "C", "D", "\n", "E", "F", "G", "H", "\n", "I", "J", "K", "L", "\n", "M", "N", "O", "P", "\n", NULL },
+    { "Q", "R", "S", "T", "\n", "U", "V", "W", "X", "\n", "Y", "Z", "-", "\n", "space", "\n", NULL },
 };
-static const char *map_cache[3][24];
+static const char *map_cache[2][32];
 
 static const char **kbd_map(int page)
 {
@@ -107,7 +104,7 @@ static const char **kbd_map(int page)
     int n = 0;
     for (int i = 0; pages[page][i]; i++) m[n++] = pages[page][i];
     /* нижний ряд: страницы алфавита, стереть, готово */
-    m[n++] = "А…"; m[n++] = "М…"; m[n++] = "Ш…"; m[n++] = LV_SYMBOL_BACKSPACE; m[n++] = LV_SYMBOL_OK;
+    m[n++] = "A…"; m[n++] = "Q…"; m[n++] = LV_SYMBOL_BACKSPACE; m[n++] = LV_SYMBOL_OK;
     m[n] = "";
     return m;
 }
@@ -115,11 +112,9 @@ static const char **kbd_map(int page)
 static void kbd_apply_page(void)
 {
     lv_buttonmatrix_set_map(st.kbd, kbd_map(st.page));
-    uint32_t letters = st.page == 2 ? 11 : 12;
-    if (st.page == 2) lv_buttonmatrix_set_button_width(st.kbd, 10, 2);   /* «пробел» шире */
-    /* подсветить текущую страницу */
-    for (int i = 0; i < 3; i++) {
-        uint32_t id = letters + (uint32_t)i;
+    uint32_t keys = st.page == 0 ? 16 : 12;
+    for (int i = 0; i < 2; i++) {
+        uint32_t id = keys + (uint32_t)i;
         if (i == st.page) lv_buttonmatrix_set_button_ctrl(st.kbd, id, LV_BUTTONMATRIX_CTRL_CHECKED);
         else lv_buttonmatrix_clear_button_ctrl(st.kbd, id, LV_BUTTONMATRIX_CTRL_CHECKED);
     }
@@ -130,23 +125,11 @@ static void field_refresh(void)
     lv_label_set_text_fmt(st.field_lbl, "%s|", st.text);
 }
 
-/* перевести заглавную русскую букву (UTF-8) в строчную */
-static void to_lower_ru(const char *up, char *out)
-{
-    unsigned char a = (unsigned char)up[0], b = (unsigned char)up[1];
-    if (a == 0xD0 && b == 0x81) { out[0] = (char)0xD1; out[1] = (char)0x91; out[2] = 0; return; }      /* Ё → ё */
-    if (a == 0xD0 && b >= 0x90 && b <= 0x9F) { out[0] = (char)0xD0; out[1] = (char)(b + 0x20); out[2] = 0; return; } /* А–П */
-    if (a == 0xD0 && b >= 0xA0 && b <= 0xAF) { out[0] = (char)0xD1; out[1] = (char)(b - 0x20); out[2] = 0; return; } /* Р–Я */
-    strcpy(out, up);
-}
-
 static void name_backspace(void)
 {
     size_t n = strlen(st.text);
     if (!n) return;
-    n--;
-    while (n > 0 && ((unsigned char)st.text[n] & 0xC0) == 0x80) n--;
-    st.text[n] = 0;
+    st.text[n - 1] = 0;
     st.letters--;
 }
 
@@ -158,84 +141,28 @@ static void kbd_event(lv_event_t *e)
     const char *t = lv_buttonmatrix_get_button_text(st.kbd, id);
     (void)e;
     if (!t || !*t) return;
-    if (!strcmp(t, "А…")) { st.page = 0; kbd_apply_page(); return; }
-    if (!strcmp(t, "М…")) { st.page = 1; kbd_apply_page(); return; }
-    if (!strcmp(t, "Ш…")) { st.page = 2; kbd_apply_page(); return; }
+    if (!strcmp(t, "A…")) { st.page = 0; kbd_apply_page(); return; }
+    if (!strcmp(t, "Q…")) { st.page = 1; kbd_apply_page(); return; }
     if (!strcmp(t, LV_SYMBOL_BACKSPACE)) { name_backspace(); field_refresh(); return; }
     if (!strcmp(t, LV_SYMBOL_OK)) {
         /* убрать пробелы по краям */
         while (st.letters && st.text[strlen(st.text) - 1] == ' ') name_backspace();
         if (!st.letters) { lv_label_set_text(st.msg, "Нужна хотя бы одна буква"); return; }
-        go(st.step == ST_OWNER ? ST_SHEEP : ST_PIN);
+        go(st.step == ST_OWNER ? ST_SHEEP : ST_DONE);
         return;
     }
     if (st.letters >= NAME_MAX_LETTERS) return;
-    char add[8];
-    if (!strcmp(t, "пробел")) { if (!st.letters) return; strcpy(add, " "); }
-    else if (st.letters == 0 || st.text[strlen(st.text) - 1] == ' ' || st.text[strlen(st.text) - 1] == '-') strcpy(add, t);
-    else to_lower_ru(t, add);
-    if (strlen(st.text) + strlen(add) >= sizeof st.text) return;
-    strcat(st.text, add);
-    st.letters++;
+    char c;
+    if (!strcmp(t, "space")) { if (!st.letters) return; c = ' '; }
+    else {
+        /* первая буква слова — заглавная, остальные — строчные */
+        char prev = st.letters ? st.text[st.letters - 1] : ' ';
+        c = (prev == ' ' || prev == '-') ? t[0] : (char)(t[0] >= 'A' && t[0] <= 'Z' ? t[0] + 32 : t[0]);
+    }
+    st.text[st.letters++] = c;
+    st.text[st.letters] = 0;
     lv_label_set_text(st.msg, "");
     field_refresh();
-}
-
-/* ---------- цифры PIN ---------- */
-
-static const char *pad_map[] = {
-    "1", "2", "3", "\n", "4", "5", "6", "\n", "7", "8", "9", "\n", LV_SYMBOL_LEFT, "0", LV_SYMBOL_BACKSPACE, "",
-};
-
-static void dots_refresh(void)
-{
-    size_t n = strlen(st.pin);
-    for (int i = 0; i < ILF_PIN_LEN_UI; i++) {
-        lv_obj_set_style_bg_opa(st.dots[i], i < (int)n ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    }
-}
-
-static void pin_complete(void)
-{
-    if (st.step == ST_PIN) {
-        strcpy(st.pin_first, st.pin);
-        go(ST_PIN2);
-    } else if (st.step == ST_PIN2) {
-        if (strcmp(st.pin, st.pin_first) != 0) {
-            go(ST_PIN);
-            lv_label_set_text(st.msg, "Не совпало, давай ещё раз");
-            return;
-        }
-        strcpy(st.result.pin, st.pin);
-        go(ST_DONE);
-    } else if (st.step == ST_LOCK) {
-        char pin[5];
-        strcpy(pin, st.pin);
-        if (st.pin_cb) st.pin_cb(pin, st.pin_user);
-    }
-}
-
-static void pad_event(lv_event_t *e)
-{
-    (void)e;
-    uint32_t id = lv_buttonmatrix_get_selected_button(st.pad);
-    const char *t = lv_buttonmatrix_get_button_text(st.pad, id);
-    if (!t || !*t) return;
-    size_t n = strlen(st.pin);
-    if (!strcmp(t, LV_SYMBOL_BACKSPACE)) {
-        if (n) st.pin[n - 1] = 0;
-    } else if (!strcmp(t, LV_SYMBOL_LEFT)) {
-        if (st.step == ST_LOCK) { ilf_ui_lock_hide(); return; }
-        if (st.step == ST_PIN) { go(ST_SHEEP); return; }
-        go(ST_PIN);
-        return;
-    } else if (n < ILF_PIN_LEN_UI) {
-        st.pin[n] = t[0];
-        st.pin[n + 1] = 0;
-        lv_label_set_text(st.msg, "");
-    }
-    dots_refresh();
-    if (strlen(st.pin) == ILF_PIN_LEN_UI) pin_complete();
 }
 
 /* ---------- шаги ---------- */
@@ -261,8 +188,7 @@ static void build_root(void)
     lv_obj_set_style_bg_opa(st.root, LV_OPA_COVER, 0);
     lv_obj_add_flag(st.root, LV_OBJ_FLAG_CLICKABLE);   /* не пропускать касания под панель */
     lv_obj_remove_flag(st.root, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
-    memset(st.dots, 0, sizeof st.dots);
-    st.title = st.hint = st.field = st.field_lbl = st.msg = st.kbd = st.pad = st.next_btn = st.head = NULL;
+    st.title = st.hint = st.field = st.field_lbl = st.msg = st.kbd = st.next_btn = st.head = NULL;
 }
 
 static void build_name_step(const char *title)
@@ -295,32 +221,32 @@ static void build_name_step(const char *title)
     field_refresh();
 }
 
-static void build_pin_step(const char *title)
-{
-    st.title = mk_label(st.root, &ilf_font_32, C_WOOL, title);
-    lv_obj_align(st.title, LV_ALIGN_TOP_MID, 0, 22);
-    for (int i = 0; i < ILF_PIN_LEN_UI; i++) {
-        lv_obj_t *d = lv_obj_create(st.root);
-        lv_obj_remove_style_all(d);
-        lv_obj_set_size(d, 22, 22);
-        lv_obj_set_pos(d, ILF_SCREEN_W / 2 - 78 + i * 44, 76);
-        lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_color(d, lv_color_hex(C_WOOL), 0);
-        lv_obj_set_style_border_width(d, 3, 0);
-        lv_obj_set_style_bg_color(d, lv_color_hex(C_WOOL), 0);
-        st.dots[i] = d;
-    }
-    st.msg = mk_label(st.root, &ilf_font_24, C_NOSE, "");
-    lv_obj_align(st.msg, LV_ALIGN_TOP_MID, 0, 108);
+/* Голова на приветствии и в конце: барашек спит — глаза-палочки по горизонтали */
+#define HELLO_SCALE 170
+#define HELLO_Y     (-6)
 
-    st.pad = lv_buttonmatrix_create(st.root);
-    style_matrix(st.pad, &ilf_font_32);
-    lv_buttonmatrix_set_map(st.pad, pad_map);
-    lv_obj_set_size(st.pad, 330, 290);
-    lv_obj_align(st.pad, LV_ALIGN_BOTTOM_MID, 0, -8);
-    lv_obj_add_event_cb(st.pad, pad_event, LV_EVENT_VALUE_CHANGED, NULL);
-    st.pin[0] = 0;
-    dots_refresh();
+static void sleepy_head(void)
+{
+    st.head = lv_image_create(st.root);
+    lv_image_set_src(st.head, &ilf_head);
+    lv_image_set_scale(st.head, HELLO_SCALE);
+    lv_obj_align(st.head, LV_ALIGN_TOP_MID, 0, HELLO_Y);
+    /* картинка масштабируется вокруг своего центра */
+    int ox = (ILF_SCREEN_W - HEAD_IMG_W) / 2 + HEAD_IMG_W / 2;
+    int oy = HELLO_Y + HEAD_IMG_H / 2;
+    int cxs[2] = { EYE_L_CX, EYE_R_CX };
+    int w = EYE_W * HELLO_SCALE / 256 + 4;
+    for (int i = 0; i < 2; i++) {
+        int x = ox + (cxs[i] - HEAD_IMG_X - HEAD_IMG_W / 2) * HELLO_SCALE / 256;
+        int y = oy + (EYE_CY - HEAD_IMG_Y - HEAD_IMG_H / 2) * HELLO_SCALE / 256;
+        lv_obj_t *lid = lv_obj_create(st.root);
+        lv_obj_remove_style_all(lid);
+        lv_obj_set_size(lid, w, 5);
+        lv_obj_set_pos(lid, x - w / 2, y - 2);
+        lv_obj_set_style_radius(lid, 3, 0);
+        lv_obj_set_style_bg_color(lid, lv_color_hex(C_PUPIL), 0);
+        lv_obj_set_style_bg_opa(lid, LV_OPA_COVER, 0);
+    }
 }
 
 static void go(step_t s)
@@ -329,10 +255,7 @@ static void go(step_t s)
     build_root();
     switch (s) {
     case ST_HELLO:
-        st.head = lv_image_create(st.root);
-        lv_image_set_src(st.head, &ilf_head);
-        lv_image_set_scale(st.head, 170);
-        lv_obj_align(st.head, LV_ALIGN_TOP_MID, 0, -6);
+        sleepy_head();
         st.title = mk_label(st.root, &ilf_font_48, C_WOOL, "Привет!");
         lv_obj_align(st.title, LV_ALIGN_TOP_MID, 0, 196);
         st.hint = mk_label(st.root, &ilf_font_24, C_SOFT, "Я твой барашек.\nДавай знакомиться");
@@ -349,18 +272,9 @@ static void go(step_t s)
         st.text[0] = 0; st.letters = 0;
         build_name_step("А как зовут меня?");
         break;
-    case ST_PIN:
-        if (st.text[0]) { strcpy(st.result.sheep, st.text); st.text[0] = 0; st.letters = 0; }
-        build_pin_step("Придумай PIN");
-        break;
-    case ST_PIN2:
-        build_pin_step("Повтори PIN");
-        break;
     case ST_DONE: {
-        st.head = lv_image_create(st.root);
-        lv_image_set_src(st.head, &ilf_head);
-        lv_image_set_scale(st.head, 170);
-        lv_obj_align(st.head, LV_ALIGN_TOP_MID, 0, -6);
+        strcpy(st.result.sheep, st.text);
+        sleepy_head();
         char buf[96];
         lv_snprintf(buf, sizeof buf, "Готово, %s!", st.result.owner);
         st.title = mk_label(st.root, &ilf_font_32, C_WOOL, buf);
@@ -372,9 +286,6 @@ static void go(step_t s)
         lv_obj_align(st.next_btn, LV_ALIGN_BOTTOM_MID, 0, -20);
         break;
     }
-    case ST_LOCK:
-        build_pin_step("Введи PIN");
-        break;
     }
 }
 
@@ -386,38 +297,4 @@ void ilf_ui_setup_start(ilf_ui_setup_cb done, void *user)
     go(ST_HELLO);
 }
 
-bool ilf_ui_setup_active(void) { return st.root && st.step != ST_LOCK; }
-
-/* ---------- замок ---------- */
-
-void ilf_ui_lock_show_pad(void)
-{
-    if (st.root) return;
-    go(ST_LOCK);
-}
-
-void ilf_ui_lock_message(const char *text)
-{
-    if (!st.root || st.step != ST_LOCK) return;
-    lv_label_set_text(st.msg, text ? text : "");
-    st.pin[0] = 0;
-    dots_refresh();
-}
-
-void ilf_ui_lock_hide(void)
-{
-    if (st.root && st.step == ST_LOCK) {
-        lv_obj_delete(st.root);
-        st.root = NULL;
-    }
-}
-
-void ilf_ui_lock_state(bool locked, ilf_ui_pin_cb cb, void *user)
-{
-    st.locked = locked;
-    st.pin_cb = cb;
-    st.pin_user = user;
-    if (!locked) ilf_ui_lock_hide();
-}
-
-bool ilf_ui_locked(void) { return st.locked; }
+bool ilf_ui_setup_active(void) { return st.root != NULL; }
