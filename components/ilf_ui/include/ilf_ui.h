@@ -12,6 +12,7 @@
 
 #include "lvgl.h"
 #include "ilf_soul.h"
+#include "ilf_herd.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +45,47 @@ void ilf_ui_update_clock(const struct tm *local_time);
 void ilf_ui_update_battery(uint8_t percent, bool charging);
 
 void ilf_ui_show_app(ilf_app_t app, bool animated);
+
+/* ---------- стадо: голосовые, рисунки, знакомство ---------- */
+
+typedef enum {
+    ILF_VOICE_IDLE = 0,
+    ILF_VOICE_NO_FRIENDS,   /* друзей нет: подсказка «стукнись с другом» */
+    ILF_VOICE_RECORDING,    /* value = секунды записи */
+    ILF_VOICE_SENDING,      /* value = ход отправки 0..1 */
+    ILF_VOICE_SENT,
+    ILF_VOICE_FAILED,
+    ILF_VOICE_PLAYING,
+} ilf_voice_state_t;
+
+typedef struct {
+    char     from[ILF_HERD_NAME_LEN];
+    uint16_t seconds;
+    bool     unplayed;
+} ilf_ui_voice_item_t;
+
+#define ILF_UI_VOICE_ROWS 3
+
+typedef struct {
+    void (*record)(bool start, void *user);          /* зажали / отпустили кнопку записи */
+    void (*next_target)(void *user);                 /* тап по «Кому» */
+    void (*play)(int item, void *user);              /* тап по голосовому из списка */
+    void (*stroke)(const ilf_stroke_t *s, void *user); /* кусок своего рисунка */
+    void (*clear)(void *user);                       /* очистили холст */
+    void *user;
+} ilf_ui_herd_cb_t;
+
+void ilf_ui_set_herd_cb(const ilf_ui_herd_cb_t *cb);
+/* Кому уходят голосовые и рисунки: «Всё стадо» или имя друга. */
+void ilf_ui_set_target(const char *name);
+void ilf_ui_voice_state(ilf_voice_state_t st, float value);
+/* Последние голосовые, новые первыми (до ILF_UI_VOICE_ROWS). */
+void ilf_ui_voice_list(const ilf_ui_voice_item_t *items, int count);
+/* Рисунок друга и очистка холста. */
+void ilf_ui_draw_remote(int friend_idx, const ilf_stroke_t *s);
+void ilf_ui_draw_clear(void);
+/* Строка про стадо на экране питомца («Знакомимся…»). NULL — убрать. */
+void ilf_ui_pet_note(const char *text);
 ilf_app_t ilf_ui_current_app(void);
 
 #ifdef __cplusplus

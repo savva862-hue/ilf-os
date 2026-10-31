@@ -9,6 +9,7 @@ set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL 1 CACHE BOOL "" FORCE)
 add_subdirectory(../components/lvgl lvgl)
 
 add_subdirectory(../components/ilf_soul ilf_soul)
+add_subdirectory(../components/ilf_herd ilf_herd)
 add_subdirectory(../components/ilf_ui ilf_ui)
 
 add_executable(ilf_sim sim_main.c)

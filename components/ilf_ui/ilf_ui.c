@@ -1,6 +1,7 @@
 #include "ilf_ui.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "ilf_clock.h"
 
@@ -58,6 +59,18 @@ static struct {
     lv_obj_t *year_lbl;
     lv_obj_t *battery_lbl;
     ilf_emotion_t last_emotion;
+    /* стадо */
+    ilf_ui_herd_cb_t herd;
+    lv_obj_t *pet_note;
+    lv_obj_t *targets[2];      /* «Кому» на голосовых и на рисунках */
+    lv_obj_t *rec_btn, *rec_dot, *voice_lbl;
+    lv_obj_t *rows[ILF_UI_VOICE_ROWS], *row_lbl[ILF_UI_VOICE_ROWS], *row_dot[ILF_UI_VOICE_ROWS];
+    lv_obj_t *canvas;
+    lv_point_t last_pt;
+    uint8_t stroke_id;
+    ilf_stroke_t pending;
+    uint32_t pending_ms;
+    struct { uint8_t id; bool has; lv_point_t pt; } remote[ILF_HERD_MAX_FRIENDS];
 } ui;
 
 /* ---------- маленькие помощники ---------- */
@@ -203,6 +216,12 @@ static void build_pet(lv_obj_t *tile)
     lv_obj_set_style_text_align(ui.status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(ui.status, 0, 340);
 
+    ui.pet_note = label(ui.stage, &ilf_font_24, C_SOFT, "");
+    lv_obj_set_width(ui.pet_note, ILF_SCREEN_W);
+    lv_obj_set_style_text_align(ui.pet_note, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(ui.pet_note, 0, 376);
+    lv_label_set_long_mode(ui.pet_note, LV_LABEL_LONG_DOT);
+
     ui.last_emotion = ILF_EMO_COUNT;
 }
 
@@ -268,25 +287,254 @@ void ilf_ui_set_pet_touch_cb(ilf_ui_touch_cb_t cb, void *user)
 
 /* ---------- остальные приложения ---------- */
 
+/* «Кому: …» — пилюля, тап переключает адресата */
+static void target_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (ui.herd.next_target) ui.herd.next_target(ui.herd.user);
+}
+
+static lv_obj_t *target_pill(lv_obj_t *tile, int y)
+{
+    lv_obj_t *pill = plain(tile);
+    lv_obj_add_flag(pill, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(pill, 18, 0);
+    lv_obj_set_style_pad_ver(pill, 6, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_color(pill, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_border_width(pill, 3, 0);
+    lv_obj_add_event_cb(pill, target_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l = label(pill, &ilf_font_24, C_WOOL, "Кому: всё стадо");
+    lv_obj_center(l);
+    lv_obj_align(pill, LV_ALIGN_TOP_MID, 0, y);
+    return pill;
+}
+
+void ilf_ui_set_target(const char *name)
+{
+    for (int i = 0; i < 2; i++) {
+        if (!ui.targets[i]) continue;
+        lv_label_set_text_fmt(lv_obj_get_child(ui.targets[i], 0), "Кому: %s", name);
+    }
+}
+
+void ilf_ui_set_herd_cb(const ilf_ui_herd_cb_t *cb) { ui.herd = *cb; }
+
+/* --- Голосовые --- */
+
+static void rec_event(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (!ui.herd.record) return;
+    if (code == LV_EVENT_PRESSED) ui.herd.record(true, ui.herd.user);
+    else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) ui.herd.record(false, ui.herd.user);
+}
+
+static void row_clicked(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (ui.herd.play) ui.herd.play(i, ui.herd.user);
+}
+
 static void build_voice(lv_obj_t *tile)
 {
-    app_title(tile, "Голосовые", "Зажми кнопку и скажи другу из стада", "скоро · v0.2");
-    lv_obj_t *mic = blob(tile, ILF_SCREEN_W / 2, 284, 104, 104, C_BG);
-    lv_obj_set_style_border_color(mic, lv_color_hex(C_WOOL), 0);
-    lv_obj_set_style_border_width(mic, 5, 0);
-    lv_obj_t *dot = blob(mic, 47, 47, 30, 30, C_WOOL);
-    (void)dot;
+    lv_obj_t *t = label(tile, &ilf_font_48, C_WOOL, "Голосовые");
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 50);
+    ui.targets[0] = target_pill(tile, 114);
+
+    for (int i = 0; i < ILF_UI_VOICE_ROWS; i++) {
+        lv_obj_t *r = plain(tile);
+        lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(r, 300, 34);
+        lv_obj_set_pos(r, 34, 166 + i * 36);
+        lv_obj_add_event_cb(r, row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        ui.row_dot[i] = blob(r, 7, 17, 12, 12, C_NOSE);
+        ui.row_lbl[i] = label(r, &ilf_font_24, C_SOFT, "");
+        lv_obj_set_pos(ui.row_lbl[i], 24, 2);
+        ui.rows[i] = r;
+        show(r, false);
+    }
+
+    ui.rec_btn = blob(tile, ILF_SCREEN_W / 2, 334, 92, 92, C_BG);
+    lv_obj_add_flag(ui.rec_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_border_color(ui.rec_btn, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_border_width(ui.rec_btn, 5, 0);
+    lv_obj_add_event_cb(ui.rec_btn, rec_event, LV_EVENT_ALL, NULL);
+    ui.rec_dot = blob(ui.rec_btn, 41, 41, 30, 30, C_WOOL);
+
+    ui.voice_lbl = label(tile, &ilf_font_24, C_SOFT, "");
+    lv_obj_set_width(ui.voice_lbl, ILF_SCREEN_W);
+    lv_obj_set_style_text_align(ui.voice_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(ui.voice_lbl, 0, 392);
+    ilf_ui_voice_state(ILF_VOICE_IDLE, 0);
+}
+
+void ilf_ui_voice_state(ilf_voice_state_t st, float value)
+{
+    if (!ui.voice_lbl) return;
+    bool rec = st == ILF_VOICE_RECORDING;
+    /* запись: точка становится квадратиком «стоп» и краснеет */
+    lv_obj_set_style_radius(ui.rec_dot, rec ? 8 : LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(ui.rec_dot, lv_color_hex(rec ? C_NOSE : C_WOOL), 0);
+    lv_obj_set_style_border_color(ui.rec_btn, lv_color_hex(rec ? C_NOSE : C_WOOL), 0);
+    switch (st) {
+    case ILF_VOICE_IDLE:       lv_label_set_text(ui.voice_lbl, "Зажми и говори"); break;
+    case ILF_VOICE_NO_FRIENDS: lv_label_set_text(ui.voice_lbl, "Стукнись с другом, чтобы дружить"); break;
+    case ILF_VOICE_RECORDING:  lv_label_set_text_fmt(ui.voice_lbl, "0:%02d · отпусти, и уйдёт", (int)value); break;
+    case ILF_VOICE_SENDING:    lv_label_set_text_fmt(ui.voice_lbl, "Отправляю… %d%%", (int)(value * 100)); break;
+    case ILF_VOICE_SENT:       lv_label_set_text(ui.voice_lbl, "Доставлено"); break;
+    case ILF_VOICE_FAILED:     lv_label_set_text(ui.voice_lbl, "Друг не рядом, не дошло"); break;
+    case ILF_VOICE_PLAYING:    lv_label_set_text(ui.voice_lbl, "Слушаем…"); break;
+    }
+}
+
+void ilf_ui_voice_list(const ilf_ui_voice_item_t *items, int count)
+{
+    for (int i = 0; i < ILF_UI_VOICE_ROWS; i++) {
+        bool on = i < count;
+        show(ui.rows[i], on);
+        if (!on) continue;
+        lv_label_set_text_fmt(ui.row_lbl[i], "%s · 0:%02u", items[i].from, (unsigned)items[i].seconds);
+        lv_obj_set_style_bg_color(ui.row_dot[i], lv_color_hex(items[i].unplayed ? C_NOSE : C_TRACK), 0);
+    }
+}
+
+/* --- Рисунки --- */
+
+#define CANVAS_W 320
+#define CANVAS_H 236
+#define PEN_W    7
+
+static void canvas_line(lv_point_t a, lv_point_t b, uint32_t color)
+{
+    lv_layer_t layer;
+    lv_canvas_init_layer(ui.canvas, &layer);
+    lv_draw_line_dsc_t d;
+    lv_draw_line_dsc_init(&d);
+    d.color = lv_color_hex(color);
+    d.width = PEN_W;
+    d.round_start = 1;
+    d.round_end = 1;
+    d.p1.x = a.x; d.p1.y = a.y;
+    d.p2.x = b.x; d.p2.y = b.y;
+    lv_draw_line(&layer, &d);
+    lv_canvas_finish_layer(ui.canvas, &layer);
+}
+
+static void flush_stroke(bool force)
+{
+    ilf_stroke_t *p = &ui.pending;
+    if (!p->count) return;
+    if (!force && p->count < 10 && lv_tick_elaps(ui.pending_ms) < 60) return;
+    if (ui.herd.stroke) ui.herd.stroke(p, ui.herd.user);
+    /* следующий кусок начинается с последней точки — у друга линия не рвётся */
+    p->pts[0] = p->pts[p->count - 1];
+    p->count = force ? 0 : 1;
+    ui.pending_ms = lv_tick_get();
+}
+
+static void add_point(lv_point_t pt)
+{
+    ilf_stroke_t *p = &ui.pending;
+    if (p->count >= ILF_HERD_STROKE_POINTS) flush_stroke(true), p->count = 0;
+    p->pts[p->count].x = (uint16_t)pt.x;
+    p->pts[p->count].y = (uint16_t)pt.y;
+    p->count++;
+}
+
+static void canvas_event(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    lv_point_t pt;
+    lv_indev_get_point(indev, &pt);
+    lv_area_t a;
+    lv_obj_get_coords(ui.canvas, &a);
+    pt.x = LV_CLAMP(0, pt.x - a.x1, CANVAS_W - 1);
+    pt.y = LV_CLAMP(0, pt.y - a.y1, CANVAS_H - 1);
+
+    if (code == LV_EVENT_PRESSED) {
+        ui.stroke_id++;
+        ui.pending = (ilf_stroke_t){ .stroke_id = ui.stroke_id };
+        ui.pending_ms = lv_tick_get();
+        canvas_line(pt, pt, C_WOOL);
+        add_point(pt);
+        ui.last_pt = pt;
+    } else if (code == LV_EVENT_PRESSING) {
+        int dx = pt.x - ui.last_pt.x, dy = pt.y - ui.last_pt.y;
+        if (dx * dx + dy * dy < 9) return;
+        canvas_line(ui.last_pt, pt, C_WOOL);
+        add_point(pt);
+        ui.last_pt = pt;
+        flush_stroke(false);
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        flush_stroke(true);
+    }
+}
+
+void ilf_ui_draw_clear(void)
+{
+    if (!ui.canvas) return;
+    lv_canvas_fill_bg(ui.canvas, lv_color_hex(C_BG), LV_OPA_COVER);
+    memset(ui.remote, 0, sizeof ui.remote);
+}
+
+static void clear_clicked(lv_event_t *e)
+{
+    (void)e;
+    ilf_ui_draw_clear();
+    if (ui.herd.clear) ui.herd.clear(ui.herd.user);
+}
+
+void ilf_ui_draw_remote(int fi, const ilf_stroke_t *s)
+{
+    if (!ui.canvas || fi < 0 || fi >= ILF_HERD_MAX_FRIENDS) return;
+    if (s->clear) { ilf_ui_draw_clear(); return; }
+    for (int i = 0; i < s->count; i++) {
+        lv_point_t pt = { LV_MIN(s->pts[i].x, CANVAS_W - 1), LV_MIN(s->pts[i].y, CANVAS_H - 1) };
+        lv_point_t from = (i == 0) ? pt : (lv_point_t){ LV_MIN(s->pts[i - 1].x, CANVAS_W - 1), LV_MIN(s->pts[i - 1].y, CANVAS_H - 1) };
+        canvas_line(from, pt, C_NOSE);
+    }
+    ui.remote[fi].id = s->stroke_id;
+    ui.remote[fi].has = true;
 }
 
 static void build_draw(lv_obj_t *tile)
 {
-    app_title(tile, "Рисунки", "Рисуй пальцем, друг увидит штрих за штрихом", "скоро · v0.2");
-    lv_obj_t *canvas = plain(tile);
-    lv_obj_set_size(canvas, 240, 130);
-    lv_obj_align(canvas, LV_ALIGN_CENTER, 0, 62);
-    lv_obj_set_style_radius(canvas, 24, 0);
-    lv_obj_set_style_border_color(canvas, lv_color_hex(C_WOOL), 0);
-    lv_obj_set_style_border_width(canvas, 5, 0);
+    lv_obj_t *t = label(tile, &ilf_font_32, C_WOOL, "Рисунки");
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 22);
+    ui.targets[1] = target_pill(tile, 68);
+
+    lv_obj_t *frame = plain(tile);
+    lv_obj_set_size(frame, CANVAS_W + 20, CANVAS_H + 20);
+    lv_obj_align(frame, LV_ALIGN_TOP_MID, 0, 118);
+    lv_obj_set_style_radius(frame, 24, 0);
+    lv_obj_set_style_border_color(frame, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_border_width(frame, 4, 0);
+
+    lv_draw_buf_t *buf = lv_draw_buf_create(CANVAS_W, CANVAS_H, LV_COLOR_FORMAT_RGB565, 0);
+    ui.canvas = lv_canvas_create(frame);
+    lv_canvas_set_draw_buf(ui.canvas, buf);
+    lv_obj_center(ui.canvas);
+    lv_obj_add_flag(ui.canvas, LV_OBJ_FLAG_CLICKABLE);
+    /* палец на холсте рисует, а не листает приложения */
+    lv_obj_remove_flag(ui.canvas, LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(ui.canvas, canvas_event, LV_EVENT_ALL, NULL);
+    ilf_ui_draw_clear();
+
+    lv_obj_t *clr = label(tile, &ilf_font_24, C_SOFT, "Очистить");
+    lv_obj_add_flag(clr, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(clr, 16);
+    lv_obj_align(clr, LV_ALIGN_TOP_MID, 0, 386);
+    lv_obj_add_event_cb(clr, clear_clicked, LV_EVENT_CLICKED, NULL);
+}
+
+void ilf_ui_pet_note(const char *text)
+{
+    if (!ui.pet_note) return;
+    lv_label_set_text(ui.pet_note, text ? text : "");
 }
 
 static void build_music(lv_obj_t *tile)
@@ -398,6 +646,8 @@ void ilf_ui_init(void)
         if (i > 0) dir |= LV_DIR_LEFT;
         if (i < ILF_APP_COUNT - 1) dir |= LV_DIR_RIGHT;
         ui.tiles[i] = lv_tileview_add_tile(ui.tileview, (uint8_t)i, 0, dir);
+        /* сами экраны не прокручиваются, свайп достаётся листанию приложений */
+        lv_obj_remove_flag(ui.tiles[i], LV_OBJ_FLAG_SCROLLABLE);
     }
     build_pet(ui.tiles[ILF_APP_PET]);
     build_voice(ui.tiles[ILF_APP_VOICE]);

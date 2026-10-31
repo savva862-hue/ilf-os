@@ -10,9 +10,9 @@ set(ILF_UI_SRCS
 if(ESP_PLATFORM)
     idf_component_register(SRCS ${ILF_UI_SRCS}
                            INCLUDE_DIRS "include"
-                           REQUIRES lvgl ilf_soul)
+                           REQUIRES lvgl ilf_soul ilf_herd)
 else()
     add_library(ilf_ui STATIC ${ILF_UI_SRCS})
     target_include_directories(ilf_ui PUBLIC include)
-    target_link_libraries(ilf_ui PUBLIC lvgl ilf_soul)
+    target_link_libraries(ilf_ui PUBLIC lvgl ilf_soul ilf_herd)
 endif()

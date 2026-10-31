@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #include "lvgl.h"
 #include "ilf_soul.h"
@@ -63,6 +64,19 @@ static void on_touch(int16_t x, int16_t y, void *user)
     ilf_soul_handle(&soul, &ev, now_ms);
 }
 
+/* виртуальный палец для сценок с рисованием */
+static lv_point_t finger;
+static bool finger_down;
+static void finger_read(lv_indev_t *i, lv_indev_data_t *d)
+{
+    (void)i;
+    d->point = finger;
+    d->state = finger_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
+static int strokes_sent, stroke_points;
+static void on_stroke(const ilf_stroke_t *st, void *user) { (void)user; strokes_sent++; stroke_points += st->count; }
+
 static void send(ilf_event_t ev) { ilf_soul_handle(&soul, &ev, now_ms); }
 
 /* Дождаться момента, когда глаза открыты (не поймать кадр посреди моргания). */
@@ -85,6 +99,11 @@ int main(int argc, char **argv)
     ilf_soul_init(&soul, 1234, now_ms);
     ilf_ui_init();
     ilf_ui_set_pet_touch_cb(on_touch, NULL);
+    lv_indev_t *finger_dev = lv_indev_create();
+    lv_indev_set_type(finger_dev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(finger_dev, finger_read);
+    ilf_ui_herd_cb_t cb = { .stroke = on_stroke };
+    ilf_ui_set_herd_cb(&cb);
     ilf_ui_update_battery(83, false);
 
     struct tm t = {0};
@@ -134,10 +153,48 @@ int main(int argc, char **argv)
     ilf_ui_update_battery(83, false);
     step(300);
 
-    /* 8. Остальные приложения (на плате — свайпом) */
-    ilf_ui_show_app(ILF_APP_VOICE, false); step(100); shot("09_app_voice");
-    ilf_ui_show_app(ILF_APP_DRAW, false);  step(100); shot("10_app_draw");
-    ilf_ui_show_app(ILF_APP_MUSIC, false); step(100); shot("11_app_music");
-    ilf_ui_show_app(ILF_APP_CLOCK, false); step(100); shot("12_app_clock");
+    /* 8. Знакомство стуком */
+    ilf_ui_pet_note("Знакомимся…");
+    step(300); settle();
+    shot("09_pairing");
+    ilf_ui_pet_note("Дружим с Барашек 3F2A!");
+    send((ilf_event_t){ .type = ILF_EV_FRIEND_MESSAGE });
+    step(300);
+    shot("10_new_friend");
+    ilf_ui_pet_note(NULL);
+
+    /* 9. Голосовые: список и запись */
+    ilf_ui_voice_item_t items[3] = {
+        { "Барашек 3F2A", 7, true }, { "Барашек 91C0", 12, false }, { "Барашек 3F2A", 3, false },
+    };
+    ilf_ui_set_target("Барашек 3F2A");
+    ilf_ui_voice_list(items, 3);
+    ilf_ui_voice_state(ILF_VOICE_IDLE, 0);
+    ilf_ui_show_app(ILF_APP_VOICE, false); step(100); shot("11_voice");
+    ilf_ui_voice_state(ILF_VOICE_RECORDING, 4); step(100); shot("12_voice_recording");
+    ilf_ui_voice_state(ILF_VOICE_SENDING, 0.45f); step(100); shot("13_voice_sending");
+
+    /* 10. Рисунки: свой штрих пальцем (кремовый) и штрих друга (розовый) */
+    ilf_ui_show_app(ILF_APP_DRAW, false); step(100);
+    finger = (lv_point_t){ 70, 300 }; finger_down = true; step(66);
+    for (int i = 0; i <= 30; i++) {
+        finger.x = (int32_t)(70 + i * 7);
+        finger.y = (int32_t)(300 - 90 * sin(i / 30.0 * 3.14159));
+        step(33);
+    }
+    finger_down = false; step(66);
+    ilf_stroke_t fr = { .stroke_id = 1, .count = 0 };
+    for (int i = 0; i < 20; i++) {
+        fr.pts[fr.count].x = (uint16_t)(160 + 60 * cos(i / 19.0 * 6.283));
+        fr.pts[fr.count].y = (uint16_t)(120 + 60 * sin(i / 19.0 * 6.283));
+        fr.count++;
+    }
+    ilf_ui_draw_remote(0, &fr);
+    step(100);
+    printf("draw: tile=%d strokes_sent=%d points=%d\n", (int)ilf_ui_current_app(), strokes_sent, stroke_points);
+    shot("14_draw");
+
+    ilf_ui_show_app(ILF_APP_MUSIC, false); step(100); shot("15_app_music");
+    ilf_ui_show_app(ILF_APP_CLOCK, false); step(100); shot("16_app_clock");
     return 0;
 }

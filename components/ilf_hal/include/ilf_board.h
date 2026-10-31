@@ -52,12 +52,13 @@ extern "C" {
 #define ILF_TOUCH_INT       GPIO_NUM_21
 #define ILF_BOOT_BUTTON     GPIO_NUM_0
 
-/* --- звук (ES8311), пока не используется: голосовые в v0.2 --- */
+/* --- звук (ES8311) --- */
 #define ILF_I2S_MCLK        GPIO_NUM_16
 #define ILF_I2S_BCLK        GPIO_NUM_9
 #define ILF_I2S_WS          GPIO_NUM_45
 #define ILF_I2S_DOUT        GPIO_NUM_8
 #define ILF_I2S_DIN         GPIO_NUM_10
+#define ILF_PA_EN           GPIO_NUM_46   /* усилитель динамика — сверить на плате */
 
 /* биты расширителя TCA9554 */
 #define ILF_EXIO_LCD_RST    (1u << 0)
@@ -108,6 +109,14 @@ esp_err_t ilf_rtc_set(const struct tm *utc);
 /* --- питание AXP2101 --- */
 esp_err_t ilf_power_init(void);
 esp_err_t ilf_power_battery(uint8_t *percent, bool *charging);
+
+/* --- звук: 8 кГц, 16 бит, моно --- */
+#define ILF_AUDIO_RATE 8000
+esp_err_t ilf_audio_init(void);
+bool   ilf_audio_ok(void);
+void   ilf_audio_speaker(bool on);
+size_t ilf_audio_read(int16_t *pcm, size_t samples, uint32_t timeout_ms);
+size_t ilf_audio_write(const int16_t *pcm, size_t samples, uint32_t timeout_ms);
 
 /* --- кнопка BOOT --- */
 esp_err_t ilf_button_init(void);
