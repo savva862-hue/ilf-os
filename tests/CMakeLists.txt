@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(ilf_tests C)
+set(CMAKE_C_STANDARD 11)
+add_compile_options(-Wall -Wextra -Werror)
+add_subdirectory(../components/ilf_soul ilf_soul)
+add_executable(ilf_tests test_main.c)
+target_link_libraries(ilf_tests ilf_soul m)
