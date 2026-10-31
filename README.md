@@ -68,6 +68,6 @@ cmake -S tests -B build/tests && cmake --build build/tests && ./build/tests/ilf_
   - время и часовой пояс с iPhone (CTS);
   - обновления по воздуху.
 
-Персонаж: `assets/character/ilf_sheep_reference.png`, экранная версия рисуется кодом в `components/ilf_ui/ilf_ui.c`, глаза — `tools/gen_eye.py`.
+Дизайн интерфейса: макет `assets/ui/ilf_ui_mockup_v2.png`. Голова барашка вырезается из него скриптом `tools/gen_head.py` (глаза закрашиваются, носик остаётся), а глаза, веки, рты, слёзы и «zzz» прошивка рисует поверх сама, поэтому барашек моргает и смотрит по сторонам. Глаза — `tools/gen_eye.py`.
 
-Шрифт Nunito: SIL Open Font License, `assets/fonts/`.
+Шрифт Nunito (Bold и ExtraBold): SIL Open Font License, `assets/fonts/`.

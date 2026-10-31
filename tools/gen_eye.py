@@ -6,7 +6,7 @@ LVGL рисует скруглённые прямоугольники, а у п�
 """
 import os
 
-EYES = {"ilf_eye_big": (42, 84), "ilf_eye_small": (34, 70)}
+EYES = {"ilf_eye_big": (42, 69), "ilf_eye_small": (36, 58)}  # размеры как на макете
 SS = 8  # суперсэмплинг для сглаживания края
 
 out = os.path.join(os.path.dirname(__file__), "..", "components", "ilf_ui", "ilf_eye_img.c")

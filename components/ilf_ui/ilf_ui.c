@@ -14,29 +14,18 @@ LV_IMAGE_DECLARE(ilf_eye_small);
 /* Палитра персонажа ILF: кремовая головка на AMOLED-чёрном */
 #define C_BG       0x000000
 #define C_WOOL     0xF3EDE2   /* текст и светлые элементы */
-#define C_HEAD     0xEEE6D9   /* мордочка и шерсть */
-#define C_SHADE    0xDCD0BC   /* тени: линия шерсти, складки */
-#define C_EAR_IN   0xCDBBA2   /* внутренняя сторона уха */
 #define C_EYE      0x000000   /* глаза — чёрные овалы */
 #define C_MOUTH    0x93795A   /* носик-«Y» и рот */
 #define C_PUPIL    0x121016
 #define C_NOSE     0xF2A7B5
-#define C_GOLD     0xF2B84B
 #define C_MUTED    0x8F879B
-#define C_CARD     0x1E1A24
-#define C_TEAR     0x7EC8F2
+#define C_SOFT     0xE4DED4   /* подписи: макет v2 весь бело-кремовый */
+#define C_TRACK    0x3A3836
 
-/* Геометрия по референсу assets/character/ilf_sheep_reference.png (масштаб 0.38) */
-#define HEAD_CX 184
-#define HEAD_CY 214
-#define HEAD_W  238
-#define HEAD_H  206
-#define EYE_W   42
-#define EYE_H   84
-#define EYE_L_CX 112
-#define EYE_R_CX 256
-#define EYE_CY  222
-#define NOSE_Y  246
+/* Голова — картинка из макета assets/ui/ilf_ui_mockup_v2.png (tools/gen_head.py),
+   глаза, веки и рты рисуются поверх неё кодом, чтобы барашек оставался живым */
+#include "ilf_head_geom.h"
+LV_IMAGE_DECLARE(ilf_head);
 
 typedef struct {
     lv_obj_t *eye;     /* чёрный овал */
@@ -130,12 +119,12 @@ static lv_obj_t *app_title(lv_obj_t *tile, const char *title, const char *subtit
 {
     lv_obj_t *t = label(tile, &ilf_font_48, C_WOOL, title);
     lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 72);
-    lv_obj_t *s = label(tile, &ilf_font_24, C_MUTED, subtitle);
-    lv_obj_set_width(s, 300);
+    lv_obj_t *s = label(tile, &ilf_font_24, C_SOFT, subtitle);
+    lv_obj_set_width(s, 340);
     lv_obj_set_style_text_align(s, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align_to(s, t, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
     if (soon) {
-        lv_obj_t *b = label(tile, &ilf_font_24, C_GOLD, soon);
+        lv_obj_t *b = label(tile, &ilf_font_24, C_SOFT, soon);
         lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -52);
     }
     return t;
@@ -153,49 +142,35 @@ static void pet_clicked(lv_event_t *e)
     ui.touch_cb((int16_t)p.x, (int16_t)p.y, ui.touch_user);
 }
 
-static lv_obj_t *lid_rect(lv_obj_t *parent)
+/* Веко — окошко, в котором видна та же картинка головы. Закрывая глаз, оно
+   показывает настоящую шерсть с тенями, поэтому краёв века не видно. */
+static lv_obj_t *lid_window(lv_obj_t *parent)
 {
-    lv_obj_t *r = plain(parent);
-    lv_obj_set_style_bg_color(r, lv_color_hex(C_HEAD), 0);
-    lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
-    lv_obj_set_size(r, EYE_W, 0);
-    return r;
+    lv_obj_t *w = plain(parent);
+    lv_obj_set_size(w, EYE_W, 0);
+    lv_obj_t *img = lv_image_create(w);
+    lv_image_set_src(img, &ilf_head);
+    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+    return w;
+}
+
+static void place_lid(lv_obj_t *w, int x, int y, int width, int height)
+{
+    lv_obj_set_pos(w, x, y);
+    lv_obj_set_size(w, width, height);
+    lv_obj_set_pos(lv_obj_get_child(w, 0), HEAD_IMG_X - x, HEAD_IMG_Y - y);
 }
 
 static void make_eye(eye_t *eye, lv_obj_t *parent, int cx)
 {
     eye->cx = cx;
-    /* глаз — сглаженный эллипс-картинка; веки — прямоугольники цвета мордочки поверх:
-       за краем глаза они сливаются с мордочкой, поэтому их не видно */
     eye->eye = lv_image_create(parent);
     lv_image_set_src(eye->eye, &ilf_eye_big);
     lv_obj_remove_flag(eye->eye, LV_OBJ_FLAG_CLICKABLE);
-    eye->lid = lid_rect(parent);
-    eye->cheek = lid_rect(parent);
-    eye->closed = arc_line(parent, cx, EYE_CY - 8, 44, 25, 155, C_PUPIL, 6);
+    eye->lid = lid_window(parent);
+    eye->cheek = lid_window(parent);
+    eye->closed = arc_line(parent, cx, EYE_CY - 6, 40, 25, 155, C_PUPIL, 5);
     lv_obj_add_flag(eye->closed, LV_OBJ_FLAG_HIDDEN);
-}
-
-/* Висячее ухо: кремовый овал с бежевой серединкой, повёрнутый вниз-наружу. */
-static void make_ear(lv_obj_t *parent, int cx, int cy, int angle_deci)
-{
-    lv_obj_t *ear = blob(parent, cx, cy, 92, 46, C_HEAD);
-    lv_obj_t *in = blob(ear, 50, 23, 64, 26, C_EAR_IN);
-    (void)in;
-    lv_obj_set_style_transform_pivot_x(ear, 46, 0);
-    lv_obj_set_style_transform_pivot_y(ear, 23, 0);
-    lv_obj_set_style_transform_rotation(ear, angle_deci, 0);
-}
-
-static lv_obj_t *nose_line(lv_obj_t *parent, const lv_point_precise_t *pts, uint32_t n)
-{
-    lv_obj_t *l = lv_line_create(parent);
-    lv_line_set_points(l, pts, n);
-    lv_obj_set_style_line_color(l, lv_color_hex(C_MOUTH), 0);
-    lv_obj_set_style_line_width(l, 3, 0);
-    lv_obj_set_style_line_rounded(l, true, 0);
-    lv_obj_set_pos(l, HEAD_CX - 8, NOSE_Y);
-    return l;
 }
 
 static void build_pet(lv_obj_t *tile)
@@ -205,54 +180,28 @@ static void build_pet(lv_obj_t *tile)
     lv_obj_add_flag(ui.stage, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(ui.stage, pet_clicked, LV_EVENT_CLICKED, NULL);
 
-    /* уши — под головой, висят вниз-наружу */
-    make_ear(ui.stage, 50, 210, 3150);  /* 315° = наклон влево-вниз */
-    make_ear(ui.stage, 318, 210, 450);
-
-    /* кудрявая макушка: бугорки по верхнему краю */
-    static const int16_t curls[][3] = {
-        {96, 160, 34}, {128, 128, 36}, {168, 114, 38}, {208, 114, 38}, {246, 126, 36}, {276, 156, 34},
-    };
-    for (size_t i = 0; i < sizeof curls / sizeof curls[0]; i++) {
-        blob(ui.stage, curls[i][0], curls[i][1], curls[i][2] * 2, curls[i][2] * 2, C_HEAD);
-    }
-    /* голова: широкая снизу, как у референса */
-    blob(ui.stage, HEAD_CX, HEAD_CY, HEAD_W, HEAD_H, C_HEAD);
-    blob(ui.stage, HEAD_CX, HEAD_CY + 34, HEAD_W - 8, HEAD_H - 70, C_HEAD);
-
-    /* шерсть: волнистая линия чёлки и пара завитков на макушке */
-    static const int16_t fringe[][2] = {
-        {122, 152}, {160, 146}, {198, 145}, {236, 148}, {272, 156},
-    };
-    for (size_t i = 0; i < sizeof fringe / sizeof fringe[0]; i++) {
-        arc_line(ui.stage, fringe[i][0], fringe[i][1], 44, 20, 160, C_SHADE, 3);
-    }
+    lv_obj_t *head = lv_image_create(ui.stage);
+    lv_image_set_src(head, &ilf_head);
+    lv_obj_remove_flag(head, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(head, HEAD_IMG_X, HEAD_IMG_Y);
 
     make_eye(&ui.eyes[0], ui.stage, EYE_L_CX);
     make_eye(&ui.eyes[1], ui.stage, EYE_R_CX);
 
-    /* носик-«Y» */
-    static const lv_point_precise_t y_left[]  = {{1, 1}, {8, 7}};
-    static const lv_point_precise_t y_right[] = {{15, 1}, {8, 7}};
-    static const lv_point_precise_t y_stem[]  = {{8, 7}, {8, 15}};
-    nose_line(ui.stage, y_left, 2);
-    nose_line(ui.stage, y_right, 2);
-    nose_line(ui.stage, y_stem, 2);
+    /* рты под носиком «Y» (он сам в картинке): появляются по эмоции */
+    ui.smile = arc_line(ui.stage, HEAD_CX, NOSE_Y - 2, 18, 30, 150, C_MOUTH, 3);
+    ui.frown = arc_line(ui.stage, HEAD_CX, NOSE_Y + 16, 18, 210, 330, C_MOUTH, 3);
+    ui.mouth_o = blob(ui.stage, HEAD_CX, NOSE_Y + 10, 9, 12, C_PUPIL);
 
-    /* рты под носиком: появляются по эмоции */
-    ui.smile = arc_line(ui.stage, HEAD_CX, NOSE_Y + 10, 28, 30, 150, C_MOUTH, 3);
-    ui.frown = arc_line(ui.stage, HEAD_CX, NOSE_Y + 34, 28, 210, 330, C_MOUTH, 3);
-    ui.mouth_o = blob(ui.stage, HEAD_CX, NOSE_Y + 26, 12, 14, C_MOUTH);
+    ui.tear = blob(ui.stage, EYE_L_CX - 10, EYE_CY + EYE_H / 2 + 6, 9, 14, C_PUPIL);
+    ui.sweat = blob(ui.stage, 262, 140, 9, 14, C_PUPIL);
+    ui.zzz = label(ui.stage, &ilf_font_32, C_WOOL, "z z Z");
+    lv_obj_set_pos(ui.zzz, 242, 40);
 
-    ui.tear = blob(ui.stage, EYE_L_CX + 4, EYE_CY + 54, 10, 16, C_TEAR);
-    ui.sweat = blob(ui.stage, 282, 150, 12, 18, C_TEAR);
-    ui.zzz = label(ui.stage, &ilf_font_32, C_GOLD, "z z Z");
-    lv_obj_set_pos(ui.zzz, 256, 70);
-
-    ui.status = label(ui.stage, &ilf_font_24, C_MUTED, "");
+    ui.status = label(ui.stage, &ilf_font_24, C_WOOL, "");
     lv_obj_set_width(ui.status, ILF_SCREEN_W);
     lv_obj_set_style_text_align(ui.status, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(ui.status, 0, 372);
+    lv_obj_set_pos(ui.status, 0, 340);
 
     ui.last_emotion = ILF_EMO_COUNT;
 }
@@ -266,26 +215,30 @@ void ilf_ui_update_face(const ilf_face_t *f)
     int dy = (int)(f->gaze_y * 5.0f);
     bool happy = f->emotion == ILF_EMO_HAPPY;
     bool scared = f->emotion == ILF_EMO_SCARED;
-    int h = scared ? EYE_H - 14 : EYE_H; /* испуганный — глаза-точки поменьше */
-    int w = scared ? EYE_W - 8 : EYE_W;
+    const lv_image_dsc_t *src = scared ? &ilf_eye_small : &ilf_eye_big;
+    int w = src->header.w, h = src->header.h;
 
     for (int i = 0; i < 2; i++) {
         eye_t *e = &ui.eyes[i];
-        lv_image_set_src(e->eye, scared ? &ilf_eye_small : &ilf_eye_big);
+        lv_image_set_src(e->eye, src);
         int ex = e->cx - w / 2 + dx, ey = EYE_CY - h / 2 + dy;
         lv_obj_set_pos(e->eye, ex, ey);
         int lid = (int)(f->eyelid * h + 0.5f);
-        lv_obj_set_size(e->lid, w + 4, lid);
-        lv_obj_set_pos(e->lid, ex - 2, ey - 1);
-        int cheek = happy ? h * 32 / 100 : 0; /* радость: снизу поджимаются «щёчки» */
-        lv_obj_set_size(e->cheek, w + 4, cheek);
-        lv_obj_set_pos(e->cheek, ex - 2, ey + h - cheek + 1);
+        place_lid(e->lid, ex - 2, ey - 2, w + 4, lid > 0 ? lid + 2 : 0);
+        int cheek = happy ? h * 30 / 100 : 0; /* радость: снизу поджимаются «щёчки» */
+        place_lid(e->cheek, ex - 2, ey + h - cheek, w + 4, cheek > 0 ? cheek + 2 : 0);
         bool closed = f->eyelid > 0.92f;
         show(e->eye, !closed);
         show(e->lid, !closed);
         show(e->cheek, !closed);
         show(e->closed, closed);
-        lv_obj_set_pos(e->closed, e->cx - 22 + dx, EYE_CY - 30 + dy);
+        if (closed) {
+            /* закрытые глаза: шерсть на месте глаза и дужка поверх */
+            place_lid(e->lid, ex - 2, ey - 2, w + 4, h + 4);
+            show(e->lid, true);
+            lv_obj_move_foreground(e->closed);
+        }
+        lv_obj_set_pos(e->closed, e->cx - 20 + dx, EYE_CY - 26 + dy);
     }
 
     show(ui.smile, !f->mouth_open && f->mouth > 0.5f);
@@ -318,10 +271,10 @@ void ilf_ui_set_pet_touch_cb(ilf_ui_touch_cb_t cb, void *user)
 static void build_voice(lv_obj_t *tile)
 {
     app_title(tile, "Голосовые", "Зажми кнопку и скажи другу из стада", "скоро · v0.2");
-    lv_obj_t *mic = blob(tile, ILF_SCREEN_W / 2, 290, 120, 120, C_CARD);
-    lv_obj_set_style_border_color(mic, lv_color_hex(C_GOLD), 0);
-    lv_obj_set_style_border_width(mic, 4, 0);
-    lv_obj_t *dot = blob(mic, 60, 60, 36, 36, C_GOLD);
+    lv_obj_t *mic = blob(tile, ILF_SCREEN_W / 2, 284, 104, 104, C_BG);
+    lv_obj_set_style_border_color(mic, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_border_width(mic, 5, 0);
+    lv_obj_t *dot = blob(mic, 47, 47, 30, 30, C_WOOL);
     (void)dot;
 }
 
@@ -332,8 +285,8 @@ static void build_draw(lv_obj_t *tile)
     lv_obj_set_size(canvas, 240, 130);
     lv_obj_align(canvas, LV_ALIGN_CENTER, 0, 62);
     lv_obj_set_style_radius(canvas, 24, 0);
-    lv_obj_set_style_border_color(canvas, lv_color_hex(C_NOSE), 0);
-    lv_obj_set_style_border_width(canvas, 3, 0);
+    lv_obj_set_style_border_color(canvas, lv_color_hex(C_WOOL), 0);
+    lv_obj_set_style_border_width(canvas, 5, 0);
 }
 
 static void build_music(lv_obj_t *tile)
@@ -341,9 +294,11 @@ static void build_music(lv_obj_t *tile)
     app_title(tile, "Музыка", "Пульт того, что играет на iPhone", "скоро · v0.3");
     static const char *syms[3] = { LV_SYMBOL_PREV, LV_SYMBOL_PLAY, LV_SYMBOL_NEXT };
     for (int i = 0; i < 3; i++) {
-        int size = i == 1 ? 104 : 80;
-        lv_obj_t *b = blob(tile, 84 + i * 100, 280, size, size, i == 1 ? C_GOLD : C_CARD);
-        lv_obj_t *l = label(b, &lv_font_montserrat_32, i == 1 ? C_PUPIL : C_WOOL, syms[i]);
+        int size = i == 1 ? 90 : 60;
+        lv_obj_t *b = blob(tile, 84 + i * 100, 284, size, size, C_BG);
+        lv_obj_set_style_border_color(b, lv_color_hex(C_WOOL), 0);
+        lv_obj_set_style_border_width(b, i == 1 ? 5 : 4, 0);
+        lv_obj_t *l = label(b, i == 1 ? &lv_font_montserrat_32 : &lv_font_montserrat_14, C_WOOL, syms[i]);
         lv_obj_center(l);
     }
 }
@@ -353,7 +308,7 @@ static void build_clock(lv_obj_t *tile)
     ui.time_lbl = label(tile, &ilf_font_digits_120, C_WOOL, "00:00");
     lv_obj_align(ui.time_lbl, LV_ALIGN_TOP_MID, 0, 88);
 
-    ui.date_lbl = label(tile, &ilf_font_32, C_MUTED, "");
+    ui.date_lbl = label(tile, &ilf_font_32, C_WOOL, "");
     lv_obj_align(ui.date_lbl, LV_ALIGN_TOP_MID, 0, 236);
 
     ui.year_bar = lv_bar_create(tile);
@@ -361,13 +316,13 @@ static void build_clock(lv_obj_t *tile)
     lv_obj_set_size(ui.year_bar, 280, 14);
     lv_obj_align(ui.year_bar, LV_ALIGN_TOP_MID, 0, 316);
     lv_bar_set_range(ui.year_bar, 0, 1000);
-    lv_obj_set_style_bg_color(ui.year_bar, lv_color_hex(C_CARD), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ui.year_bar, lv_color_hex(C_TRACK), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui.year_bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ui.year_bar, lv_color_hex(C_GOLD), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ui.year_bar, lv_color_hex(C_WOOL), LV_PART_INDICATOR);
     lv_obj_set_style_radius(ui.year_bar, 7, LV_PART_MAIN);
     lv_obj_set_style_radius(ui.year_bar, 7, LV_PART_INDICATOR);
 
-    ui.year_lbl = label(tile, &ilf_font_24, C_WOOL, "");
+    ui.year_lbl = label(tile, &ilf_font_24, C_SOFT, "");
     lv_obj_align(ui.year_lbl, LV_ALIGN_TOP_MID, 0, 344);
 }
 
@@ -388,7 +343,7 @@ void ilf_ui_update_battery(uint8_t percent, bool charging)
     if (!ui.battery_lbl) return;
     lv_label_set_text_fmt(ui.battery_lbl, "%s%u%%", charging ? "+" : "", (unsigned)percent);
     lv_obj_set_style_text_color(ui.battery_lbl,
-                                lv_color_hex(percent <= ILF_SOUL_HUNGRY_PERCENT && !charging ? C_NOSE : C_MUTED), 0);
+                                lv_color_hex(percent <= ILF_SOUL_HUNGRY_PERCENT && !charging ? C_NOSE : C_WOOL), 0);
 }
 
 /* ---------- навигация ---------- */
@@ -452,7 +407,7 @@ void ilf_ui_init(void)
 
     /* поверх всех экранов: заряд сверху и точки-страницы снизу */
     lv_obj_t *top = lv_layer_top();
-    ui.battery_lbl = label(top, &ilf_font_24, C_MUTED, "");
+    ui.battery_lbl = label(top, &ilf_font_24, C_WOOL, "");
     lv_obj_align(ui.battery_lbl, LV_ALIGN_TOP_RIGHT, -28, 16);
 
     lv_obj_t *row = plain(top);
